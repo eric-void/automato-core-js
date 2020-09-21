@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Automato Test</title>
+  
+  <script src="../lib/mqtt-2.18.8.min.js" type="text/javascript"></script>
+  <script src="../lib/pako_inflate.min.js" type="text/javascript"></script>
+  <script src="../lib/jquery-3.2.1.min.js" type="text/javascript"></script>
+  
+  <script src="../src/automato/core/system.js" type="text/javascript"></script>
+  <script src="../src/automato/core/utils.js" type="text/javascript"></script>
+  <script src="../src/automato/core/scripting_js.js" type="text/javascript"></script>
+  <script src="../src/automato/core/notifications.js" type="text/javascript"></script>
+  <script src="../src/automato/core/mqtt.js" type="text/javascript"></script>
+  
+  <script>
+    function automato_loader(config, use_metadata = false) {
+      let system = new AutomatoSystem(this);
+      system.set_config(config);
+      system.boot();
+      system.on_entry_load(function(entry) {
+        console.debug("on_entry_load", entry);
+      });
+      system.on_loaded(function(loaded, initial) {
+        console.debug("on_loaded", loaded, initial);
+      });
+      system.on_initialized(function(all_entries) {
+        console.debug("on_initialized", all_entries);
+        
+        if (use_metadata) {
+          let metadata = localStorage.getItem('automato_metadata');
+          if (metadata)
+            metadata = JSON.parse(metadata);
+          if (metadata && metadata['time'] && system.time() - metadata['time'] < 86400) {
+            console.info("Metadata found in local storage, using it ...", metadata['entries']);
+            system.entry_load_definitions(metadata['entries'], false, false, false, false);
+          } else {
+            console.info("Metadata not found in local storage, or invalid, requesting it to the broker ...");
+            system.broker().publish("automato/metadata/get", "");
+          }
+        }
+      });
+      
+      system.on_message(function(message) {
+        //console.debug("on_message", message);
+        //console.debug("on_message.events", message.events());
+        //console.debug("on_message.publishedMessages", message.publishedMessages());
+        //console.debug("on_message.subscribedMessages", message.subscribedMessages());
+        //let pm = message.firstPublishedMessage();
+        //if (pm)
+        //  console.debug("on_message.firstPublishedMessages.notification", pm.notificationLevelString(), pm.notificationString());
+        
+        if (use_metadata && message.topic == 'automato/metadata') {
+          let entries = null;
+          try {
+            entries = typeof message.payload['entries'] == "string" ? JSON.parse(pako.inflate(atob(message.payload['entries']), {to: 'string'})) : message.payload['entries'];
+            if (entries && isinstance(entries, 'dict')) {
+              console.info("Metadata received from broker: ", entries);
+              system.entry_load_definitions(entries, false, false, false, false);
+              localStorage.setItem('automato_metadata', JSON.stringify({'time': system.time(), 'entries': entries}));
+            }
+          } catch (exception) {
+            console.error("Failed decoding automato/metadata entries", message.payload, exception);
+          }
+        }
+      });
+      
+      return system;
+    }
+    
+    if (false) {
+      var system = automato_loader({
+        'listen_all_events': true,
+        'mqtt': {
+          'broker_host': 'localhost',
+          'broker_port': '1884',
+          'broker_protocol': 'mqtt',
+        },
+      });
+      system.init(function() {
+        console.log("connected!");
+      });
+    }
+    
+    if (false) {
+      var system = automato_loader({
+        'listen_all_events': true,
+        'mqtt': {
+          'broker_host': 'localhost',
+          'broker_port': '1884',
+          'broker_protocol': 'mqtt',
+        },
+        "entries": [
+          {
+            "item": "entry_a",
+            //"events_listen": [".test_event"],
+            "publish": {
+              "item/entry_a/event": {
+                "type": "string",
+                "events": {
+                  "test_event": "js:({ port: 'entry_a', value: payload })"
+                },
+                "notify": "Notifica {payload}",
+                "notify_level": "warn"
+              }
+            },
+            "subscribe": {
+              "item/entry_a/action": {
+                "actions": {
+                  "test_action": "js:params",
+                }
+              }
+            }
+            //"events_passthrough": "entry_b.test_action_response", // TODO Testare
+          },
+        ]
+      });
+      system.on_message(function(message) {
+        if (message.topic == 'item/entry_a/event')
+          system.do_action("entry_a.test_action", {'x': 1});
+      });
+      system.init(function() {
+        console.log("connected!");
+        
+        system.broker().publish("item/entry_a/event", "test");
+      });
+      
+      /*system.on_event('*.test_event', function(entry, eventname, eventdata) {
+        console.log("on_event", entry, eventname, eventdata);
+      });*/
+      
+      // system.event_get('otherbutton1@OTHERNODE.input')
+    }
+    
+    if (true) {
+      let is_local = document.location.hash.indexOf('LOCAL') >= 0;
+      var system = automato_loader({
+        'listen_all_events': true,
+        'mqtt': {
+          'client_id': 'client_web',
+          'broker_host': !is_local ? 'golconda.dyndns.org' : 'mqtt',
+          'broker_port': !is_local ? 11885 : 1884,
+          'broker_protocol': !is_local ? 'wss' : 'ws',
+          'broker_user': 'device',
+          'broker_pass': 'mqttDeviceObu',
+        },
+      }, true);
+      
+      system.on_message(function(message) {
+        let level = false;
+        let pms = message.publishedMessages();
+        let publishers = '';
+        if (pms.length)
+          for (let pm of pms) {
+            publishers += '<div class="data-publisher"><span class="data-notify-level data-notify-level-' + (pm.notificationLevelString() ? pm.notificationLevelString() : '-') + '">' + (pm.notificationLevelString() ? ' ' + pm.notificationLevelString() : '-') + '</span>' + 
+              '<div class="data-publisher-x"><span class="data-entry-id data-publisher-entry-id">' + pm.entry.id + '</span> &gt;' + (pm.notificationString() ? ' <span class="data-notify">' + pm.notificationString() + '</span>' : '');
+            let events = pm.events();
+            for (let e in events)
+              publishers += '<span class="data-publisher-event">' + e + (len(events[e].params) ? '<span class="data-publisher-event-params">{' + Object.entries(events[e].params).map(v => v[0] in events[e].changed_params ? '<b>' + v[0] + ': ' + v[1] + '</b>' : v[0] + ': ' + str(v[1])).join(", ") + '}</span>' : '') + '</span>';
+            publishers += '</div></div>'
+            if (!level && pm.notificationLevelString())
+              level = pm.notificationLevelString();
+          }
+        let sms = message.subscribedMessages();
+        let subscribers = '';
+        if (sms.length)
+          for (let sm of sms)
+            if (!sm.internal)
+              subscribers += '<div class="data-subscriber">&gt; <span class="data-entry-id data-subscriber-entry-id">' + sm.entry.id + '</span></div>';
+        let m = '<div class="data-message"><span class="data-message-topic">' + message.topic + (message.qos != 0 ? ' (qos: ' + message.qos + ')' : '') + (message.retain ? ' (RETAINED)' : '') + '</span>: <span class="data-message-payload">' + message.payload_source + '</span>';
+        //let publishers = '', subscribers = '', m = '', level = '';
+        $("#messagesLog tbody").prepend(
+          `<tr class="row-class-${level ? level : 'debug'}"><td class="data-cell-time">${strftime("%H:%M:%S", message.received / 1000) + (system.timems() - message.received > 1000 ? '<div class="data-time-delay">+ ' + Math.floor((system.timems() - message.received) / 1000) + 's</div>' : '')}</td><td class="data-cell-info">${publishers}${subscribers}${m}</tr>`
+        );
+        $("#messagesLog").trigger('rows-changed');
+      });
+      system.init(function() {});
+    }
+
+  </script>
+</head>
+<body>
+  <button id="destroy">Shutdown</button>
+  <script>
+    document.getElementById("destroy").addEventListener("click", function() { system.destroy() });
+  </script>
+  
+  <style>
+    table.filtered-by-search tr {  }
+    table.filtered-by-search tr.filtered-by-search { display: none !important; }
+    table.filtered-by-class tr { display: none; }
+    table.table-paused tr { position: absolute; visibility: hidden; }
+    table.table-paused tr.table-paused-visible { position: inherit; visibility: visible; }
+    
+    body {
+      font-family: arial;
+      font-size: 14px;
+    }
+    a.table-pause {
+      background-color: red;
+      display: inline-block;
+      width: 2em;
+      height: 1em;
+    }
+
+    #messagesLog {
+      border-collapse: collapse;
+    }
+    #messagesLog td {
+      border-top: 1px solid #eeeeee;
+    }
+    #messagesLog .data-cell-time {
+      width: 60px;
+      vertical-align: top;
+      line-height: 25px;
+      text-align: right;
+    }
+    #messagesLog .data-time-delay {
+      font-size: 80%;
+    }
+    #messagesLog .data-entry-id {
+      font-weight: bold;
+    }
+    #messagesLog .data-publisher {}
+    #messagesLog .data-publisher-x {
+      margin-left: 90px;
+      line-height: 25px;
+    }
+    #messagesLog .data-subscriber {
+      margin-left: 90px;
+      line-height: 25px;
+    }
+    #messagesLog .data-publisher .data-notify-level {
+      float: left;
+      width: 5em;
+      border: 1px solid #cccccc;
+      background-color: #eeeeee;
+      text-align: center;
+      padding: 1px;
+      margin: .2em .5em;
+    }
+    #messagesLog .data-publisher .data-notify-level-info {
+      background-color: lightblue;
+    }
+    #messagesLog .data-publisher .data-notify-level-warn {
+      background-color: yellow;
+    }
+    #messagesLog .data-publisher .data-notify-level-error {
+      background-color: orange;
+    }
+    #messagesLog .data-publisher .data-notify-level-critical {
+      background-color: red; color: white;
+    }
+    #messagesLog .data-publisher .data-publisher-entry-id {}
+    #messagesLog .data-publisher .data-notify {
+      font-style: italic;
+    }
+    #messagesLog .data-publisher-event {
+      background-color: green;
+      color: white;
+      padding: 5px;
+      margin: 0 0 0 10px;
+      display: inline-block;
+      line-height: 14px;
+      border-radius: 5px;
+    }
+    #messagesLog .data-publisher-event-params {
+      margin: 0 0 0 5px;
+      font-size: 75%;
+      vertical-align: top;
+      display: inline-block;
+      background-color: white;
+      color: green;
+      opacity: .9;
+      padding: 0 2px;
+      border-radius: 2px;
+    }
+    #messagesLog .data-subscriber .data-subscriber-entry-id {}
+    #messagesLog .data-message {
+      color: #999999;
+      font-size: 90%;
+      margin-left: 90px;
+      line-height: 25px;
+    }
+    #messagesLog .data-message-topic {}
+    #messagesLog .data-message-payload {}
+
+    
+  </style>
+  <div class="table-prefix">
+    Search: <input type="textfield" class="table-search" ref="messagesLog" /><span class="separator"></span>
+    <a class="table-pause" ref="messagesLog"></a><span class="separator"></span>
+    Filter: <span class="table-filter-class" ref="messagesLog" data-default-filter="debug,info,warn,error,critical"><a data-filter="debug,info,warn,error,critical">Debug</a> | <a data-filter="info,warn,error,critical">Info</a> | <a data-filter="warn,error,critical">Warn</a> | <a data-filter="error,critical">Error</a> | <a data-filter="critical">Critical</a></span>
+  </div>
+  <div class="table-wrapper"><table id="messagesLog" max-rows="1000"><tbody>
+  </tbody></table></div>
+
+  
+
+  <script>
+
+function icon_class(icon) {
+  return 'icon ' + (!icon.match(/\bfa[a-z]\b/) ? 'fa ' : '') + icon + ' fa-fw';
+}
+
+/**
+ * Set/replace CSS code
+ */
+function htmlStyleSet(id, data) {
+  if (!$("style#" + id + "-style").length)
+    $(document.head).append('<style id="' + id + '-style"></style>');
+  $("style#" + id + "-style").html(data);
+}
+
+/********************************************************************************
+ * TABLES
+ * 
+ * Syntax:
+ * <div class="table-prefix">
+ *  Search: <input type="textfield" class="table-search" ref="mqttNotificationsLog" /><span class="separator"></span>
+ *  <a class="table-pause" ref="mqttNotificationsLog"></a><span class="separator"></span>
+ *  Filter: <span class="table-filter-class" ref="mqttNotificationsLog" data-default-filter="info,warn,error,critical"><a data-filter="debug,info,warn,error,critical">Debug</a> | <a data-filter="info,warn,error,critical">Info</a> | <a data-filter="warn,error,critical">Warn</a> | <a data-filter="error,critical">Error</a> | <a data-filter="critical">Critical</a></span>
+ * </div>
+ * <div class="table-wrapper"><table id="mqttNotificationsLog" max-rows="1000"><tbody>
+ *  <tr class="row-class-info">...</tr>
+ * </tbody></table></div>
+ * 
+ * If you add/change rows to table dinamically, call:
+ * $(tableElement).trigger('rows-changed');
+ * 
+ ********************************************************************************/
+
+function htmlTablesInit() {
+  $(".table-search").each(function() {
+    var table = $("#" + $(this).attr("ref"));
+    var table_search_field = $(this);
+    function processRows(table, filter) {
+      $("tr", table).each(function () {
+        if (!filter || $(this).text().toLowerCase().indexOf(filter.toLowerCase()) < 0)
+          $(this).addClass("filtered-by-search");
+        else
+          $(this).removeClass("filtered-by-search");
+      });
+    }
+    $(this).keyup(function() {
+      var filter = $(this).val();
+      if (filter)
+        table.addClass("filtered-by-search");
+      else
+        table.removeClass("filtered-by-search");
+      processRows(table, filter);
+    });
+    $(table).on("rows-changed", table, function() {
+      processRows(table, $(table_search_field).val());
+    });
+  });
+  $(".table-filter-class").each(function() {
+    var ref = $(this).attr("ref");
+    var table = $("#" + ref);
+    var filters = $(this);
+    $("a[data-filter]", filters).click(function() {
+      var filter = $(this).attr('data-filter').split(",");
+      if (filter) {
+        table.addClass("filtered-by-class");
+        var style = '';
+        for (var f in filter)
+          style = style + '#' + ref + ' .row-class-' + filter[f] + ' { display: inherit; }';
+        htmlStyleSet(ref + '-filter-class', style);
+      } else {
+        table.removeClass("filtered-by-class");
+        htmlStyleSet(ref + '-filter-class', '');
+      }
+      $("a[data-filter]", filters).removeClass("active");
+      $(this).addClass("active");
+    });
+    if ($(this).attr("data-default-filter")) {
+      $("a[data-filter='" + $(this).attr("data-default-filter") + "']", filters).click();
+    }
+  });
+  $(".table-pause").each(function() {
+    var table = $("#" + $(this).attr("ref"));
+    $(this).html('<i class="' + icon_class('fa-pause') + '"></i>');
+    $(this).click(function() {
+      table.toggleClass("table-paused");
+      if (table.hasClass("table-paused")) {
+        $("tr", table).addClass("table-paused-visible");
+        $(this).html('<i class="' + icon_class('fa-play') + '"></i>');
+      } else {
+        $("tr", table).removeClass("table-paused-visible");
+        $(this).html('<i class="' + icon_class('fa-pause') + '"></i>');
+      }
+    });
+  });
+  $(".table-wrapper table").on("rows-changed", function() {
+    if ($(this).attr("max-rows"))
+      htmlTableReduce($(this), $(this).attr("max-rows"));
+  });
+}
+
+/**
+ * Keep table length to a max size
+ */
+function htmlTableReduce(table_dom_el, len = 1000, prob = .5) {
+  if (Math.random() < prob) {
+    //console.warn("REDUCE")
+    var rowsels = $("tbody tr", table_dom_el);
+    for (i = len; i < rowsels.length; i ++) {
+      rowsels[i].remove();
+      delete rowsels[i];
+    }
+  }
+}
+
+htmlTablesInit();
+  </script>
+  
+</body>
+</html>
