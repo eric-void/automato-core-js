@@ -705,6 +705,10 @@ AutomatoSystem = function(caller_context) {
     
     return result;
   }
+  
+  this.topic_match_priority(definition) {
+    return 'topic_match_priority' in definition ? definition['topic_match_priority'] : (len(definition) > 1 || (len(definition) == 1 && !('topic' in definition)) ? 1 : 0);
+  }
 
   this.topic_cache_reset = function() {
     this.index_topic_cache = { 'hits': 0, 'miss': 0, 'data': { } };
@@ -712,7 +716,8 @@ AutomatoSystem = function(caller_context) {
 
   this.topic_cache_find = function(index, cache_key, topic, payload = null) {
     /*
-    @return (0: topic rule found, 1: topic metadata { 'definition': {}, 'entries': []}, 2: matches)
+    @param index is { topic:  { 'definition': { ... merged definition from all TOPIC published by entries ... }, 'entries': [ ... entry ids ... ]};
+    @return (0: topic rule found, 1: topic metadata { 'definition': { ... merged definition from all topic published by entries ... }, 'entries': [ ... entry ids ... ]}, 2: matches)
     */
     if (!(cache_key in this.index_topic_cache['data']))
       this.index_topic_cache['data'][cache_key] = {};
@@ -842,11 +847,10 @@ AutomatoSystem = function(caller_context) {
         for (let entry_id of this.index_topic_published[topic]['entries']) {
           let entry = this.entry_get(entry_id);
           if (entry) {
-            if (!(entry_id in res))
-              res[entry_id] = {}
-            res[entry_id][topic] = {
+            res[entry_id] = {
               'entry': entry,
               'definition': entry.definition['publish'][topic],
+              'topic': topic,
               'matches': [],
             };
           } else
@@ -860,13 +864,15 @@ AutomatoSystem = function(caller_context) {
         for (let entry_id of t[1]['entries']) {
           let entry = this.entry_get(entry_id);
           if (entry) {
+            if (entry_id in res && topic_match_priority(entry.definition['publish'][t[0]]) > topic_match_priority(res[entry_id]['definition']))
+              delete res[entry_id];
             if (!(entry_id in res))
-              res[entry_id] = {};
-            res[entry_id][t[0]] = {
-              'entry': entry,
-              'definition': entry.definition['publish'][t[0]],
-              'matches': t[2],
-            };
+              res[entry_id] = {
+                'entry': entry,
+                'definition': entry.definition['publish'][t[0]],
+                'topic': t[0],
+                'matches': t[2],
+              };
           } else
             console.error("SYSTEM> Internal error, entry references in index_topic_published not found: {entry_id}".format({entry_id: entry_id}));
         }
@@ -887,11 +893,10 @@ AutomatoSystem = function(caller_context) {
         for (let entry_id of this.index_topic_subscribed[topic]['entries']) {
           let entry = this.entry_get(entry_id);
           if (entry) {
-            if (!(entry_id in res))
-              res[entry_id] = {};
-            res[entry_id][topic] = {
+            res[entry_id] = {
               'entry': entry,
               'definition': entry.definition['subscribe'][topic],
+              'topic': topic,
               'matches': [],
             };
           } else
@@ -904,13 +909,15 @@ AutomatoSystem = function(caller_context) {
         for (let entry_id of t[1]['entries']) {
           let entry = this.entry_get(entry_id);
           if (entry) {
+            if (entry_id in res && topic_match_priority(entry.definition['subscribe'][t[0]]) > topic_match_priority(res[entry_id]['definition']))
+              delete res[entry_id];
             if (!(entry_id in res))
-              res[entry_id] = {};
-            res[entry_id][t[0]] = {
-              'entry': entry,
-              'definition': entry.definition['subscribe'][t[0]],
-              'matches': t[2],
-            };
+              res[entry_id] = {
+                'entry': entry,
+                'definition': entry.definition['subscribe'][t[0]],
+                'topic': t[0],
+                'matches': t[2],
+              };
           } else
             console.error("SYSTEM> Internal error, entry references in index_topic_subscribed not found: {entry_id}".format({entry_id: entry_id}));
         }
@@ -952,11 +959,7 @@ AutomatoSystem = function(caller_context) {
         _s = system._stats_start();
         this._publishedMessages = [];
         for (let entry_id in entries)
-          for (let entry_topic in entries[entry_id]) {
-            // let entry = entries[entry_id][entry_topic]['entry'];
-            // let definition = entries[entry_id][entry_topic]['definition']
-            this._publishedMessages.push(new system.PublishedMessage(system, this, entries[entry_id][entry_topic]['entry'], entry_topic, entries[entry_id][entry_topic]['definition'], entries[entry_id][entry_topic]['matches'] != [true] ? entries[entry_id][entry_topic]['matches'] : []));
-          }
+          this._publishedMessages.push(new system.PublishedMessage(system, this, entries[entry_id]['entry'], entries[entry_id]['topic'], entries[entry_id]['definition'], entries[entry_id]['matches'] != [true] ? entries[entry_id]['matches'] : []));
         system._stats_end('Message.publishedMessages().create', _s);
         system._stats_end('Message(' + this.topic + ').publishedMessages().create', _s);
       }
@@ -991,11 +994,7 @@ AutomatoSystem = function(caller_context) {
         _s = system._stats_start();
         this._subscribedMessages = [];
         for (let entry_id in entries)
-          for (let entry_topic in entries[entry_id]) {
-            // let entry = entries[entry_id][entry_topic]['entry'];
-            // let definition = entries[entry_id][entry_topic]['definition'];
-            this._subscribedMessages.push(new system.SubscribedMessage(system, this, entries[entry_id][entry_topic]['entry'], entry_topic, entries[entry_id][entry_topic]['definition'], entries[entry_id][entry_topic]['matches'] != [true] ? entries[entry_id][entry_topic]['matches'] : []));
-          }
+          this._subscribedMessages.push(new system.SubscribedMessage(system, this, entries[entry_id]['entry'], entries[entry_id]['topic'], entries[entry_id]['definition'], entries[entry_id]['matches'] != [true] ? entries[entry_id]['matches'] : []));
         system._stats_end('Message.subscribedMessages().create', _s);
         system._stats_end('Message(' + this.topic + ').subscribedMessages().create', _s);
       }
@@ -1336,19 +1335,18 @@ AutomatoSystem = function(caller_context) {
 
     // Add specific listeners, as described in metadata 'response'
     let subs = this.entries_subscribed_to(message.topic, message.payload);
-    for (let entry_id  in subs)
-      for (let topic_rule in subs[entry_id]) {
-        let r = subs[entry_id][topic_rule];
-        if (r['definition'] && 'response' in r['definition'])
-          for (let t in r['definition']['response'])
-            if ('topic' in t) {
-              let rtopic_rule = t['topic'];
-              if (rtopic_rule.indexOf("{") >= 0)
-                for (let i in r['matches'])
-                  rtopic_rule = rtopic_rule.replace("{matches[" + i + "]}", "" + r['matches'][i]);
-              s['listeners'].push({ 'topic_rule': rtopic_rule, 'expiry': timems() + ('duration' in t ? read_duration(t['duration']) : default_duration) * 1000, 'count': 'count' in t ? t['count'] : default_count });
-            }
-      }
+    for (let entry_id  in subs) {
+      let r = subs[entry_id];
+      if (r['definition'] && 'response' in r['definition'])
+        for (let t in r['definition']['response'])
+          if ('topic' in t) {
+            let rtopic_rule = t['topic'];
+            if (rtopic_rule.indexOf("{") >= 0)
+              for (let i in r['matches'])
+                rtopic_rule = rtopic_rule.replace("{matches[" + i + "]}", "" + r['matches'][i]);
+            s['listeners'].push({ 'topic_rule': rtopic_rule, 'expiry': timems() + ('duration' in t ? read_duration(t['duration']) : default_duration) * 1000, 'count': 'count' in t ? t['count'] : default_count });
+          }
+    }
     
     if (!s['listeners'])
       return false;
