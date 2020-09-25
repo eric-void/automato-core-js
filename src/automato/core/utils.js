@@ -67,6 +67,22 @@ function json_sorted_encode(data) {
   return JSON.stringify(sorted);
 }
 
+function b64_compress_data(data) {
+  /*
+   * Compress and base-64 encode data
+   * NEEDS: pako (deflate) zlib library
+   */
+  return btoa(pako.deflate(JSON.stringify(data), {'to': 'string'}));
+}
+
+function b64_decompress_data(string) {
+  /*
+   * Compress and base-64 encode data
+   * NEEDS: pako (inflate) zlib library
+   */
+  return JSON.parse(pako.inflate(atob(string), {to: 'string'}));
+}
+
 /***************************************************************************************************************************************************************
   *
   * JS SPECIFIC
