@@ -70,7 +70,7 @@ function AutomatoNotifications(system, scripting_js) {
     let string = null;
     if (!string && 'notify_handler' in defaults)
       string = scripting_js.script_eval(defaults['notify_handler'], {"topic": topic, "payload": payload, "matches": matches}, false, true);
-    else if (!string && 'notify' in defaults)
+    else if (!string && 'notify' in defaults && defaults['notify'])
       string = this.notification_parse_string(defaults['notify'], { 'payload': payload, 'matches': matches, 'caption': entry.caption}, 'payload', defaults);
     
     if (string) {
