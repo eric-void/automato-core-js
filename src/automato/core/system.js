@@ -26,6 +26,7 @@ AutomatoSystem = function(caller_context) {
       'notify_change_duration': true,
       'notify_if': true,
       "events": true,
+      "topic_match_priority": true,
     },
     'subscribe': {
       'description': true,
@@ -39,6 +40,7 @@ AutomatoSystem = function(caller_context) {
       'notify_change_level': true,
       'notify_if': true,
       "actions": true,
+      "topic_match_priority": true,
     },
     'events_passthrough': true,
   };
@@ -706,8 +708,13 @@ AutomatoSystem = function(caller_context) {
     return result;
   }
   
-  this.topic_match_priority(definition) {
-    return 'topic_match_priority' in definition ? definition['topic_match_priority'] : (len(definition) > 1 || (len(definition) == 1 && !('topic' in definition)) ? 1 : 0);
+  this.topic_match_priority = function(definition) {
+    if ('topic_match_priority' in definition)
+      return definition['topic_match_priority'];
+    for (let k in definition)
+      if (!k.match(/^(topic|notify.*|description)$/))
+        return 1;
+    return 0;
   }
 
   this.topic_cache_reset = function() {
@@ -864,7 +871,7 @@ AutomatoSystem = function(caller_context) {
         for (let entry_id of t[1]['entries']) {
           let entry = this.entry_get(entry_id);
           if (entry) {
-            if (entry_id in res && topic_match_priority(entry.definition['publish'][t[0]]) > topic_match_priority(res[entry_id]['definition']))
+            if (entry_id in res && this.topic_match_priority(entry.definition['publish'][t[0]]) > this.topic_match_priority(res[entry_id]['definition']))
               delete res[entry_id];
             if (!(entry_id in res))
               res[entry_id] = {
@@ -909,7 +916,7 @@ AutomatoSystem = function(caller_context) {
         for (let entry_id of t[1]['entries']) {
           let entry = this.entry_get(entry_id);
           if (entry) {
-            if (entry_id in res && topic_match_priority(entry.definition['subscribe'][t[0]]) > topic_match_priority(res[entry_id]['definition']))
+            if (entry_id in res && this.topic_match_priority(entry.definition['subscribe'][t[0]]) > this.topic_match_priority(res[entry_id]['definition']))
               delete res[entry_id];
             if (!(entry_id in res))
               res[entry_id] = {
