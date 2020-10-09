@@ -1244,7 +1244,7 @@ AutomatoSystem = function(caller_context) {
     /*
     @params eventdata { 'params' : ..., ... }
     */
-    return scripting_js.script_eval(condition, eventdata, /*to_dict = */false, /*cache = */true);
+    return scripting_js.script_eval(condition, {'params': eventdata['params'], 'changed_params': eventdata['changed_params'], 'keys': eventdata['keys']}, /*to_dict = */false, /*cache = */true);
   }
 
   this._entry_event_publish_and_invoke_listeners = function(entry, entry_topic, eventname, params, time) {
