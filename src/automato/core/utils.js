@@ -59,6 +59,10 @@ function parse_datetime(v, milliseconds_float = false) {
   return !milliseconds_float ? Math.floor(ret) : ret;
 }
 
+function sorted_dict(data) {
+  return Object.fromEntries(Object.entries(data).sort(function(a, b) { return a[0] > b[0] ? 1 : (a[0] == b[0] ? 0 : -1); }));
+}
+
 function json_sorted_encode(data) {
   if (!isinstance(data, 'dict'))
     return data;

@@ -251,13 +251,13 @@ AutomatoSystem = function(caller_context) {
     let _tpsize = Object.values(this.index_topic_cache['data']).map(function(x) { return len(x); });
     console.info(('SYSTEM> DEBUG TIMINGS\n  total: {total}min\n' +
       '  mqtt_queue_delay: {delay}ms (size: {size})\n' + 
-      '  script_eval_cache: {schits}/{sctotal} hits ({scperc}%), {scsize} size, {scskip} uncacheable, {scdisabled} cache disabled\n' + 
+      '  script_eval_cache: {schits}/{sctotal} hits ({scperc}%), {scsize} size, {scskip} uncacheable, {scdisabled} cache disabled, {scsign} signatures\n' + 
       '  topic cache: {tphits}/{tptotal} ({tpperc}%) hits, {tpsize} size\n' + 
       '  system_stats:\n{stats}').format({
       total: Math.round(total / 60000),
       delay: mqtt.queueDelay(), size: mqtt.mqtt_communication_queue.length,
       schits: scripting_js.script_eval_cache_hits, sctotal: scripting_js.script_eval_cache_hits + scripting_js.script_eval_cache_miss, 
-        scperc: (scripting_js.script_eval_cache_hits + scripting_js.script_eval_cache_miss) > 0 ? Math.round(scripting_js.script_eval_cache_hits * 100 / (scripting_js.script_eval_cache_hits + scripting_js.script_eval_cache_miss)) : 0, scsize: len(scripting_js.script_eval_cache), scskip: scripting_js.script_eval_cache_skipped, scdisabled: scripting_js.script_eval_cache_disabled,
+        scperc: (scripting_js.script_eval_cache_hits + scripting_js.script_eval_cache_miss) > 0 ? Math.round(scripting_js.script_eval_cache_hits * 100 / (scripting_js.script_eval_cache_hits + scripting_js.script_eval_cache_miss)) : 0, scsize: len(scripting_js.script_eval_cache), scskip: scripting_js.script_eval_cache_skipped, scdisabled: scripting_js.script_eval_cache_disabled, scsign: len(scripting_js.script_eval_codecontext_signatures),
       tphits: this.index_topic_cache['hits'], tptotal: this.index_topic_cache['hits'] + this.index_topic_cache['miss'], tpperc: (this.index_topic_cache['hits'] + this.index_topic_cache['miss']) > 0 ? Math.round(this.index_topic_cache['hits'] * 100 / (this.index_topic_cache['hits'] + this.index_topic_cache['miss'])) : 0, 
         tpsize: _tpsize.length > 0 ? _tpsize.reduce(function(a, b) { return a + b}) : 0,
       stats: stats
@@ -708,11 +708,13 @@ AutomatoSystem = function(caller_context) {
     return result;
   }
   
+  this._re_topic_match_priority = /^(topic|notify.*|description)$/;
+  
   this.topic_match_priority = function(definition) {
     if ('topic_match_priority' in definition)
       return definition['topic_match_priority'];
     for (let k in definition)
-      if (!k.match(/^(topic|notify.*|description)$/))
+      if (!this._re_topic_match_priority.exec(k))
         return 1;
     return 0;
   }
