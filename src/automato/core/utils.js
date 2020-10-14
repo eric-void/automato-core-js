@@ -87,6 +87,44 @@ function b64_decompress_data(string) {
   return JSON.parse(pako.inflate(atob(string), {to: 'string'}));
 }
 
+function array_avg(a) {
+  let s = 0;
+  let c = 0;
+  for (i in a)
+    if (i !== null) {
+      s = s + i;
+      c ++;
+    }
+  return c > 0 ? s / c : null;
+}
+
+function array_sum(a) {
+  let s = 0;
+  let c = 0;
+  for (i in a)
+    if (i !== null) {
+      s = s + i;
+      c ++;
+    }
+  return c > 0 ? s : null;
+}
+
+function array_min(a) {
+  let s = null;
+  for (i in a)
+    if (i !== null && (s === null || i < s))
+      s = i;
+  return s;
+}
+
+function array_max(a) {
+  let s = null;
+  for (i in a)
+    if (i !== null && (s === null || i > s))
+      s = i;
+  return s;
+}
+
 /***************************************************************************************************************************************************************
   *
   * JS SPECIFIC

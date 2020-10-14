@@ -22,6 +22,10 @@ function AutomatoScriptingJs(system, caller_context) {
       'd': read_duration,
       't': parse_datetime,
       'strftime': strftime,
+      'array_sum': array_sum,
+      'array_avg': array_avg,
+      'array_min': array_min,
+      'array_max': array_max,
       'print': console.log,
       '_': _,
     }, this.exports, context);
