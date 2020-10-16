@@ -29,6 +29,8 @@ copy.deepcopy > deepcopy
 utils\.dict_merge\( > dict_merge\(
 utils\.read_duration\( > read_duration\(
 json\.dumps\( > JSON\.stringify\(
+\.endswith > \.endsWith
+\.startswith > \.startsWith
 
 REPLACE MANUALI:
 hasattr(x, y) > y in x

@@ -155,9 +155,8 @@
           for (let pm of pms) {
             publishers += '<div class="data-publisher"><span class="data-notify-level data-notify-level-' + (pm.notificationLevelString() ? pm.notificationLevelString() : '-') + '">' + (pm.notificationLevelString() ? ' ' + pm.notificationLevelString() : '-') + '</span>' + 
               '<div class="data-publisher-x"><span class="data-entry-id data-publisher-entry-id">' + pm.entry.id + '</span> &gt;' + (pm.notificationString() ? ' <span class="data-notify">' + pm.notificationString() + '</span>' : '');
-            let events = pm.events();
-            for (let e in events)
-              publishers += '<span class="data-publisher-event">' + e + (len(events[e].params) ? '<span class="data-publisher-event-params">{' + Object.entries(events[e].params).map(v => v[0] in events[e].changed_params ? '<b>' + v[0] + ': ' + v[1] + '</b>' : v[0] + ': ' + str(v[1])).join(", ") + '}</span>' : '') + '</span>';
+            for (let e in pm.events())
+              publishers += '<span class="data-publisher-event">' + e['name'] + (len(e['params']) ? '<span class="data-publisher-event-params">{' + Object.entries(e['params']).map(v => v[0] in e['changed_params'] ? '<b>' + v[0] + ': ' + v[1] + '</b>' : v[0] + ': ' + str(v[1])).join(", ") + '}</span>' : '') + '</span>';
             publishers += '</div></div>'
             if (!level && pm.notificationLevelString())
               level = pm.notificationLevelString();
