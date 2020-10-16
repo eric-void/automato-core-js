@@ -500,7 +500,7 @@ AutomatoSystem = function(caller_context) {
   }
     
   this._on_events_passthrough_listener = function(source_entry, entry, eventname, eventdata) {
-    this._entry_event_publish_and_invoke_listeners(source_entry, '#events_passthrough', eventname, eventdata['params'], eventdata['time']);
+    this._entry_event_publish_and_invoke_listeners(source_entry, eventname, eventdata['params'], eventdata['time'], '#events_passthrough');
   }
 
   /*
@@ -1057,7 +1057,7 @@ AutomatoSystem = function(caller_context) {
               system._stats_end('PublishedMessages.event_process', _s)
               if (event) {
                 _s = system._stats_start();
-                let eventdata = system._entry_event_publish(this.entry, this.topic_rule, event['name'], event['params'], !message.retain ? system.time() : 0);
+                let eventdata = system._entry_event_publish(this.entry, event['name'], event['params'], !message.retain ? system.time() : 0);
                 system._stats_end('PublishedMessages.event_publish', _s);
                 this._events[event['name']] = eventdata;
               }
@@ -1157,7 +1157,7 @@ AutomatoSystem = function(caller_context) {
     return scripting_js.script_eval(transformdef, {"topic": topic, "payload": payload}, /*to_dict = */true, /*cache = */true);
   }
 
-  this._entry_event_publish = function(entry, entry_topic, eventname, params, time) {
+  this._entry_event_publish = function(entry, eventname, params, time) {
     /*
     Given an event generated (by a published messaged, or by and event passthrough), process it's params to generate event data and store it's content in this.events_published history var
     @param time timestamp event has been published, or 0 if from a retained message
@@ -1170,9 +1170,9 @@ AutomatoSystem = function(caller_context) {
     let params_key = json_sorted_encode(result['keys']);
     
     // Extract changed params (from previous event detected)
-    if (eventname in this.events_published && entry.id in this.events_published[eventname] && params_key in this.events_published[eventname][entry.id] && entry_topic in this.events_published[eventname][entry.id][params_key]) {
+    if (eventname in this.events_published && entry.id in this.events_published[eventname] && params_key in this.events_published[eventname][entry.id]) {
       for (let k in params)
-        if (!(k in this.events_published[eventname][entry.id][params_key][entry_topic]['params']) || params[k] != this.events_published[eventname][entry.id][params_key][entry_topic]['params'][k])
+        if (!(k in this.events_published[eventname][entry.id][params_key]['params']) || params[k] != this.events_published[eventname][entry.id][params_key]['params'][k])
           result['changed_params'][k] = params[k];
     } else
       result['changed_params'] = params;
@@ -1182,9 +1182,7 @@ AutomatoSystem = function(caller_context) {
         this.events_published[eventname] = {};
       if (!(entry.id in this.events_published[eventname]))
         this.events_published[eventname][entry.id] = {};
-      if (!(params_key in this.events_published[eventname][entry.id]))
-        this.events_published[eventname][entry.id][params_key] = {};
-      this.events_published[eventname][entry.id][params_key][entry_topic] = this.events_published[eventname][entry.id][params_key]["*"] = this.events_published[eventname]['*'] = result;
+      this.events_published[eventname][entry.id][params_key] = this.events_published[eventname]['*'] = result;
     }
     
     return result;
@@ -1208,14 +1206,11 @@ AutomatoSystem = function(caller_context) {
 
       let to_delete = []
       for (let params_key in this.events_published[eventname][entry.id])
-        for (let topic in this.events_published[eventname][entry.id][params_key])
-          if (!condition || this._entry_event_params_match_condition(this.events_published[eventname][entry.id][params_key][topic], condition))
-            to_delete.push([params_key, topic]);
+        if (!condition || this._entry_event_params_match_condition(this.events_published[eventname][entry.id][params_key], condition))
+          to_delete.push(params_key);
       for (let i in to_delete) {
         i = to_delete[i];
-        delete this.events_published[eventname][entry.id][i[0]][i[1]];
-        if (!len(this.events_published[eventname][entry.id][i[0]]))
-          delete this.events_published[eventname][entry.id][i[0]];
+        delete this.events_published[eventname][entry.id][i];
       }
     }
   }
@@ -1249,10 +1244,10 @@ AutomatoSystem = function(caller_context) {
     return scripting_js.script_eval(condition, {'params': eventdata['params'], 'changed_params': eventdata['changed_params'], 'keys': eventdata['keys']}, /*to_dict = */false, /*cache = */true);
   }
 
-  this._entry_event_publish_and_invoke_listeners = function(entry, entry_topic, eventname, params, time) {
-    // @param entry_topic is "#events_passthrough" in case of events_passthrough
-    let eventdata = this._entry_event_publish(entry, entry_topic, eventname, params, time);
-    this._entry_event_invoke_listeners(entry, eventname, eventdata, entry_topic == '#events_passthrough' ? 'events_passthrough' : null)
+  this._entry_event_publish_and_invoke_listeners = function(entry, eventname, params, time, caller) {
+    // @param caller is "#events_passthrough" in case of events_passthrough
+    let eventdata = this._entry_event_publish(entry, eventname, params, time);
+    this._entry_event_invoke_listeners(entry, eventname, eventdata, caller)
   }
 
 
@@ -1651,12 +1646,11 @@ AutomatoSystem = function(caller_context) {
     
     let match = null;
     if (eventname in this.events_published && entry_id in this.events_published[eventname])
-      for (let params_key in this.events_published[eventname][entry_id])
-        if (topic == null || topic in this.events_published[eventname][entry_id][params_key]) {
-          let e = (topic == null ? this.events_published[eventname][entry_id][params_key]["*"] : this.events_published[eventname][entry_id][params_key][topic]);
-          if ((timeout == null || this.time() - e['time'] <= read_duration(timeout)) && (condition == null || _entry_event_params_match_condition(e, condition)) && (!match || e['time'] > match['time']))
-            match = e;
-        }
+      for (let params_key in this.events_published[eventname][entry_id]) {
+        let e = this.events_published[eventname][entry_id][params_key];
+        if ((timeout == null || this.time() - e['time'] <= read_duration(timeout)) && (condition == null || _entry_event_params_match_condition(e, condition)) && (!match || e['time'] > match['time']))
+          match = e;
+      }
     if (match) {
       if (!keys)
         return match['params'];
@@ -1688,7 +1682,7 @@ AutomatoSystem = function(caller_context) {
       res[eventname] = []
       if (eventname in this.events_published && entry.id in this.events_published[eventname])
         for (let params_key in this.events_published[eventname][entry.id])
-          res[eventname].push(this.events_published[eventname][entry.id][params_key]["*"]);
+          res[eventname].push(this.events_published[eventname][entry.id][params_key]);
     }
     return res;
   }
@@ -1708,19 +1702,14 @@ AutomatoSystem = function(caller_context) {
             this.events_published[eventname] = {};
           if (!(entry_id in this.events_published[eventname]))
             this.events_published[eventname][entry_id] = {};
-          if (!(params_key in this.events_published[eventname][entry_id]))
-            this.events_published[eventname][entry_id][params_key] = {};
-          
-          let prevdata = "*" in this.events_published[eventname][entry_id][params_key] ? this.events_published[eventname][entry_id][params_key]["*"] : null;
+          let prevdata = params_key in this.events_published[eventname][entry_id] ? this.events_published[eventname][entry_id][params_key] : null;
           let go = mode == 3 || !prevdata || (!prevdata.time && eventdata.time > 0);
           if (!go && mode == 1)
             go = eventdata.time >= prevdata.time;
           if (!go && mode == 2)
             go = prevdata.time >= 0;
           if (go) {
-            this.events_published[eventname][entry_id][params_key]["*"] = this.events_published[eventname]['*'] = eventdata;
-            // TODO WARN entry_topic is not passed in exported events, so i could not fill entry_topic reference (and so entry_event_get(topic = '...') will not work)
-            // this.events_published[eventname][entry_id][params_key][entry_topic] = ???
+            this.events_published[eventname][entry_id][params_key] = this.events_published[eventname]['*'] = eventdata;
             this._entry_event_invoke_listeners(this.entry_get(entry_id), eventname, eventdata, 'import');
           }
         }
