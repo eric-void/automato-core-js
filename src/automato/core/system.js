@@ -1495,7 +1495,7 @@ AutomatoSystem = function(caller_context) {
             entry.events_keys[eventname.slice(0, -5)] = entry.definition['publish'][topic]['events'][eventname];
           else if (eventname.endsWith(":init")) {
             let data = isinstance(entry.definition['publish'][topic]['events'][eventname], 'list') ? entry.definition['publish'][topic]['events'][eventname] : [ entry.definition['publish'][topic]['events'][eventname] ];
-            for (let eventparams in data) 
+            for (let eventparams of data) 
               this._entry_event_publish(entry, eventname.slice(0, -5), eventparams, -1);
           }
         }
@@ -1519,7 +1519,7 @@ AutomatoSystem = function(caller_context) {
             entry.actions[actionname].push(topic);
           } else if (actionname.endsWith(":init")) {
             let data = isinstance(entry.definition['subscribe'][topic]['actions'][actionname], 'list') ? entry.definition['subscribe'][topic]['actions'][actionname] : [ entry.definition['subscribe'][topic]['actions'][actionname] ];
-            for (let eventparams in data) 
+            for (let eventparams of data) 
               this._entry_event_publish(entry, 'action/' + actionname.slice(0, -5), eventparams, -1);
           }
         }
