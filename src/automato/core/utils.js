@@ -87,7 +87,13 @@ function b64_decompress_data(string) {
   return JSON.parse(pako.inflate(atob(string), {to: 'string'}));
 }
 
-function array_avg(a) {
+function _round(v, decimals = -1) {
+  if (decimals < 0)
+    return v;
+  return Math.round(v * Math.pow(10, decimals)) / Math.pow(10, decimals);
+}
+
+function array_avg(a, decimals = -1) {
   let s = 0;
   let c = 0;
   for (i in a)
@@ -95,7 +101,7 @@ function array_avg(a) {
       s = s + i;
       c ++;
     }
-  return c > 0 ? s / c : null;
+  return c > 0 ? _round(s / c, decimals) : null;
 }
 
 function array_sum(a) {
@@ -106,7 +112,7 @@ function array_sum(a) {
       s = s + i;
       c ++;
     }
-  return c > 0 ? s : null;
+  return c > 0 ? _round(s, decimals) : null;
 }
 
 function array_min(a) {
