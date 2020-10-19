@@ -26,6 +26,9 @@ function AutomatoScriptingJs(system, caller_context) {
       'array_avg': array_avg,
       'array_min': array_min,
       'array_max': array_max,
+      'round': round,
+      'is_array': is_array,
+      'is_dict': is_dict,
       'print': console.log,
       '_': _,
     }, this.exports, context);

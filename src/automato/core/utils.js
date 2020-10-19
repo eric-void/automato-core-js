@@ -87,7 +87,7 @@ function b64_decompress_data(string) {
   return JSON.parse(pako.inflate(atob(string), {to: 'string'}));
 }
 
-function _round(v, decimals = -1) {
+function round(v, decimals = 0) {
   if (decimals < 0)
     return v;
   return Math.round(v * Math.pow(10, decimals)) / Math.pow(10, decimals);
@@ -101,7 +101,7 @@ function array_avg(a, decimals = -1) {
       s = s + i;
       c ++;
     }
-  return c > 0 ? _round(s / c, decimals) : null;
+  return c > 0 ? round(s / c, decimals) : null;
 }
 
 function array_sum(a) {
@@ -112,7 +112,7 @@ function array_sum(a) {
       s = s + i;
       c ++;
     }
-  return c > 0 ? _round(s, decimals) : null;
+  return c > 0 ? round(s, decimals) : null;
 }
 
 function array_min(a) {
@@ -129,6 +129,14 @@ function array_max(a) {
     if (i !== null && (s === null || i > s))
       s = i;
   return s;
+}
+
+function is_array(v) {
+  return typeof v == "object" && Array.isArray(v);
+}
+
+function is_dict(v) {
+  return typeof v == "object" && v.constructor == Object && !(v instanceof Array);
 }
 
 /***************************************************************************************************************************************************************
