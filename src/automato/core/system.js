@@ -1054,7 +1054,7 @@ AutomatoSystem = function(caller_context) {
           for (let eventname in this.definition['events']) {
             if (eventname.indexOf(":") < 0) {
               let eventdefs = isinstance(this.definition['events'][eventname], 'list') ? this.definition['events'][eventname] : [ this.definition['events'][eventname] ];
-              for (let eventdef in eventdefs)
+              for (let eventdef of eventdefs) {
                 if (('listen_all_events' in system.config && system.config['listen_all_events']) || (eventname in system.events_listeners && ("*" in system.events_listeners[eventname] || this.entry.id in system.events_listeners[eventname]))) {
                   let _s = system._stats_start();
                   let event = system._entry_event_process(this.entry, eventname, eventdef, this);
@@ -1066,6 +1066,7 @@ AutomatoSystem = function(caller_context) {
                     this._events.push(eventdata);
                   }
                 }
+              }
             }
           }
         }
@@ -1126,7 +1127,7 @@ AutomatoSystem = function(caller_context) {
     let _s = this._stats_start();
     for (let pm of m.publishedMessages().values()) {
       pm.entry.last_seen = Math.floor(timems / 1000);
-      for (let eventdata in pm.events())
+      for (let eventdata of pm.events())
         this._entry_event_invoke_listeners(pm.entry, eventdata, 'message', pm);
     }
     this._stats_end('on_mqtt_message.invoke_listeners', _s);
