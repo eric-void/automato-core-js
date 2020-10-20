@@ -45,7 +45,7 @@ AutomatoSystem = function(caller_context) {
     'events_passthrough': true,
   };
   const PRIMITIVE_TYPES = ['int', 'str', 'bool', 'float', 'dict', 'list'];
-  const ENTRY_EVENT_PARAMS_KEYS = ['port', 'channel'];
+  const ENTRY_EVENT_PARAMS_KEYS = ['port'];
 
   this.index_topic_cache = { 'hits': 0, 'miss': 0, 'data': {} };
   this.INDEX_TOPIC_CACHE_MAXSIZE = 1024;
