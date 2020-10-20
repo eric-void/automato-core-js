@@ -173,7 +173,7 @@ if (!String.prototype.rightJustify)
 
 function str(v) {
   return '' + 
-    (typeof v == 'object' && v.constructor == Object ? "{" + Object.entries(v).map(function(v) { return v[0] + ': ' + str(v[1])}).join(", ") + "}" :
+    (typeof v == 'object' && v !== null && v.constructor == Object ? "{" + Object.entries(v).map(function(v) { return v[0] + ': ' + str(v[1])}).join(", ") + "}" :
     (typeof v == 'object' && Array.isArray(v) ? "[" + v + "]" : 
     v));
 }
