@@ -121,6 +121,7 @@ AutomatoSystem = function(caller_context) {
   this.init = function(callback) {
     this.destroyed = false;
     this.all_entries = {};
+    this.all_nodes = {};
     this.exports = {};
     this.subscriptions = {};
     this.last_entry_and_events_for_received_mqtt_message = null;
@@ -339,6 +340,8 @@ AutomatoSystem = function(caller_context) {
     this._entry_actions_load(entry);
     
     this.all_entries[entry_id] = entry;
+    if (!(entry.node_name in this.all_nodes))
+      this.all_nodes[entry.node_name] = {};
 
     return entry;
   }
@@ -497,7 +500,8 @@ AutomatoSystem = function(caller_context) {
   }
   
   this._on_events_passthrough_listener_lambda = function(source_entry) {
-    return function(entry, eventname, eventdata) { return this._on_events_passthrough_listener(source_entry, entry, eventname, eventdata) };
+    let this_system = this;
+    return function(entry, eventname, eventdata) { return this_system._on_events_passthrough_listener(source_entry, entry, eventname, eventdata) };
   }
     
   this._on_events_passthrough_listener = function(source_entry, entry, eventname, eventdata) {
@@ -615,19 +619,34 @@ AutomatoSystem = function(caller_context) {
     entry.definition = dict_merge(_default, entry.definition);
   }
 
+  /**
+   * Return if the id of the entry (reference) matches the one on the entry
+   * If the reference has no "@", only the local part is matched (so, if there are more entries with the same local part, every one of these is matched)
+   */
   this.entry_id_match = function(entry, reference) {
-    return (entry.id == reference) || (reference.indexOf("@") < 0 && entry.is_local && entry.id_local == reference);
+    //OBSOLETE: return (entry.id == reference) || (reference.indexOf("@") < 0 && entry.is_local && entry.id_local == reference);
+    return (entry.id == reference) || (reference.indexOf("@") < 0 && entry.id_local == reference);
   }
 
-  this.entry_id_expand = function(entry_id) {
-    return entry_id != "*" && entry_id.indexOf("@") < 0 ? entry_id + '@' + this.default_node_name : entry_id;
+  this.entry_id_find = function(entry_id) {
+    //OBSOLETE: return entry_id != "*" && entry_id.indexOf("@") < 0 ? entry_id + '@' + this.default_node_name : entry_id;
+    if (entry_id == "*" || entry_id.indexOf("@") >= 0)
+      return entry_id;
+    for (let node_name in this.all_nodes)
+      if ((entry_id + "@" + node_name) in this.all_entries)
+        return entry_id + "@" + node_name;
+    return null;
   }
 
-  this.entry_get = function(entry_id, local = false) {
+  this.entry_get = function(entry_id) {
+    /* OBSOLETE: (with parameter local = false)
     let d = entry_id.indexOf("@");
     if (d < 0)
       return entry_id + '@' + this.default_node_name in this.all_entries ? this.all_entries[entry_id + '@' + this.default_node_name] : null;
     return entry_id in this.all_entries && (!local || this.all_entries[entry_id].is_local) ? this.all_entries[entry_id] : null;
+    */
+    let id = this.entry_id_find(entry_id);
+    return id ? this.all_entries[id] : null;
   }
 
   this.entries_definition_exportable = function() {
@@ -1055,7 +1074,7 @@ AutomatoSystem = function(caller_context) {
             if (eventname.indexOf(":") < 0) {
               let eventdefs = isinstance(this.definition['events'][eventname], 'list') ? this.definition['events'][eventname] : [ this.definition['events'][eventname] ];
               for (let eventdef of eventdefs) {
-                if (('listen_all_events' in system.config && system.config['listen_all_events']) || (eventname in system.events_listeners && ("*" in system.events_listeners[eventname] || this.entry.id in system.events_listeners[eventname]))) {
+                if (('listen_all_events' in system.config && system.config['listen_all_events']) || (eventname in system.events_listeners && ("*" in system.events_listeners[eventname] || this.entry.id in system.events_listeners[eventname] || this.entry.id_local in system.events_listeners[eventname]))) {
                   let _s = system._stats_start();
                   let event = system._entry_event_process(this.entry, eventname, eventdef, this);
                   system._stats_end('PublishedMessages.event_process', _s)
@@ -1169,8 +1188,6 @@ AutomatoSystem = function(caller_context) {
     Note: if an event has no "event_params_keys", it's data will be setted to all other stored data (of events with params_key). If a new params_key occours, the data will be merged with "no params-key" data.
     @param time timestamp event has been published, 0 if from a retained message, -1 if from an event data initialization
     */
-    //console.debug("SYSTEM> Published event " + entry.id + "." + eventname + " = " + str(params))
-    
     let data = { 'name': eventname, 'time': time, 'params': params, 'changed_params': {}, 'keys': {} };
     let event_params_keys = eventname in entry.events_keys ? entry.events_keys[eventname] : ('event_params_keys' in entry.definition ? entry.definition['event_params_keys'] : ENTRY_EVENT_PARAMS_KEYS);
     data['keys'] = params ? Object.fromEntries( Object.entries(params).map(function(v) { return event_params_keys.includes(v[0]) ? v : null }).filter(function(v) { return v; }) ) : {};
@@ -1556,7 +1573,7 @@ AutomatoSystem = function(caller_context) {
     else {
       if (!(d['event'] in this.events_listeners))
         this.events_listeners[d['event']] = {};
-      d['entry'] = this.entry_id_expand(d['entry']);
+      //OBSOLETE: d['entry'] = this.entry_id_find(d['entry']);
       if (!(d['entry'] in this.events_listeners[d['event']]))
         this.events_listeners[d['event']][d['entry']] = [];
       if (listener)
@@ -1582,9 +1599,6 @@ AutomatoSystem = function(caller_context) {
     @param listener a callback, defined as listener(entry, eventname, eventdata)
     @param condition javascript condition to match event. Example: "port = 1 && value < 10"
     */
-    //if (!(event in entry.events_listeners)) {
-    //  entry.events_listeners[event] = []
-    //entry.events_listeners[event].push([listener, condition])
     this.on_event({'entry': entry.id, 'event': event, 'condition': condition}, listener);
   }
 
@@ -1690,7 +1704,7 @@ AutomatoSystem = function(caller_context) {
     @param keys List of event params names to get. Use "_time" as param name to get event time
     @param timeout null or a duration
     */
-    let entry_id = isinstance(entry_or_id, 'str') ? this.entry_id_expand(entry_or_id) : entry.id;
+    let entry_id = isinstance(entry_or_id, 'str') ? this.entry_id_find(entry_or_id) : entry.id;
     
     let match = null;
     if (eventname in this.events_published && entry_id in this.events_published[eventname])
@@ -1740,7 +1754,7 @@ AutomatoSystem = function(caller_context) {
   
   this.events_import = function(data, mode = 0) {
     /*
-     * @param mode = 0 only import events not present, or with time = 0
+     * @param mode = 0 only import events not present, or with time = -1|0
      * @param mode = 1 ... also events with time >= than the one in memory
      * @param mode = 2 ... also all events with time > 0
      * @param mode = 3 import all events (even if time = 0)
@@ -1755,18 +1769,15 @@ AutomatoSystem = function(caller_context) {
           if (!(entry_id in this.events_published[eventname]))
             this.events_published[eventname][entry_id] = {};
           let prevdata = params_key in this.events_published[eventname][entry_id] ? this.events_published[eventname][entry_id][params_key] : null;
-          let go = mode == 3 || !prevdata || (!prevdata.time && eventdata.time > 0);
+          let go = mode == 3 || !prevdata || (prevdata.time <= 0 && eventdata.time > 0);
           if (!go && mode == 1)
             go = eventdata.time >= prevdata.time;
           if (!go && mode == 2)
-            go = prevdata.time >= 0;
+            go = eventdata.time > 0;
           if (go) {
             this.events_published[eventname][entry_id][params_key] = eventdata;
-            if (eventdata['time'] >= 0 && !temporary) {
-              // TODO OBSOLETE Tenere finchè su golconda non c'è il codice nuovo che ha già "eventdata['name']"
-              if (!('name' in eventdata)) eventdata['name'] = eventname;
+            if (eventdata['time'] >= 0 && !temporary)
               this._entry_event_invoke_listeners(this.entry_get(entry_id), eventdata, 'import');
-            }
           }
         }
   }
@@ -1778,7 +1789,7 @@ AutomatoSystem = function(caller_context) {
     return all_events;
   }
 
-  this._re_decode_event_reference = new RegExp('^(?<entry>[A-Za-z0-9@*_-]+)?(?:\.(?<event>[A-Za-z0-9_-]+))?(?:\((?<condition>.*)\))?$');
+  this._re_decode_event_reference = new RegExp('^(?<entry>[A-Za-z0-9@*_-]+)?(?:\\.(?<event>[A-Za-z0-9_-]+))?(?:\\((?<condition>.*)\\))?$');
 
   this.decode_event_reference = function(s, default_entry_id = null, default_event = null, no_event = false) {
     /*
@@ -1795,7 +1806,7 @@ AutomatoSystem = function(caller_context) {
     return m && m['entry'] && (m['event'] || no_event) ? m : null;
   }
 
-  this._re_decode_action_reference = new RegExp('^(?<entry>[A-Za-z0-9@*_-]+)?(?:\.(?<action>[A-Za-z0-9_-]+))?(?:\((?<init>.*)\))?$');
+  this._re_decode_action_reference = new RegExp('^(?<entry>[A-Za-z0-9@*_-]+)?(?:\\.(?<action>[A-Za-z0-9_-]+))?(?:\\((?<init>.*)\\))?$');
 
   this.decode_action_reference = function(s, default_entry_id = null, default_action = null, no_action = false) {
     /*
