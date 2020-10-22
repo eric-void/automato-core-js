@@ -45,7 +45,7 @@ AutomatoSystem = function(caller_context) {
     'events_passthrough': true,
   };
   const PRIMITIVE_TYPES = ['int', 'str', 'bool', 'float', 'dict', 'list'];
-  const ENTRY_EVENT_PARAMS_KEYS = ['port'];
+  const EVENT_KEYS = ['port'];
 
   this.index_topic_cache = { 'hits': 0, 'miss': 0, 'data': {} };
   this.INDEX_TOPIC_CACHE_MAXSIZE = 1024;
@@ -1181,49 +1181,61 @@ AutomatoSystem = function(caller_context) {
   this._entry_transform_payload = function(entry, topic, payload, transformdef) {
     return scripting_js.script_eval(transformdef, {"topic": topic, "payload": payload}, /*to_dict = */true, /*cache = */true);
   }
+  
+  this.entry_event_keys = function(entry, eventname) {
+    return eventname in entry.events_keys ? entry.events_keys[eventname] : ('event_keys' in entry.definition ? entry.definition['event_keys'] : EVENT_KEYS);
+  }
+  
+  this.entry_event_keys_index = function(key_values, temporary = false) {
+    return (temporary ? "T:" : "") + json_sorted_encode(key_values);
+  }
+  
+  this.entry_event_keys_index_is_temporary = function(keys_index) {
+    return keys_index.startsWith("T:");
+  }
 
   this._entry_event_publish = function(entry, eventname, params, time) {
     /*
     Given an event generated (by a published messaged, or by an event passthrough), process it's params to generate event data and store it's content in this.events_published history var
-    Note: if an event has no "event_params_keys", it's data will be setted to all other stored data (of events with params_key). If a new params_key occours, the data will be merged with "no params-key" data.
+    Note: if an event has no "event_keys", it's data will be setted to all other stored data (of events with keys_index). If a new keys_index occours, the data will be merged with "no params-key" data.
     @param time timestamp event has been published, 0 if from a retained message, -1 if from an event data initialization
     */
     let data = { 'name': eventname, 'time': time, 'params': params, 'changed_params': {}, 'keys': {} };
-    let event_params_keys = eventname in entry.events_keys ? entry.events_keys[eventname] : ('event_params_keys' in entry.definition ? entry.definition['event_params_keys'] : ENTRY_EVENT_PARAMS_KEYS);
-    data['keys'] = params ? Object.fromEntries( Object.entries(params).map(function(v) { return event_params_keys.includes(v[0]) ? v : null }).filter(function(v) { return v; }) ) : {};
-    let params_key = json_sorted_encode(data['keys']);
+    let event_keys = this.entry_event_keys(entry, eventname);
+    data['keys'] = params ? Object.fromEntries( Object.entries(params).map(function(v) { return event_keys.includes(v[0]) ? v : null }).filter(function(v) { return v; }) ) : {};
+    let keys_index = this.entry_event_keys_index(data['keys']);
     
-    // If this is a new params_key, i must merge data with empty params_key (if present)
-    if (params_key != '{}' && eventname in this.events_published && entry.id in this.events_published[eventname] && '{}' in this.events_published[eventname][entry.id] && !(params_key in this.events_published[eventname][entry.id]))
+    // If this is a new keys_index, i must merge data with empty keys_index (if present)
+    if (keys_index != '{}' && eventname in this.events_published && entry.id in this.events_published[eventname] && '{}' in this.events_published[eventname][entry.id] && !(keys_index in this.events_published[eventname][entry.id]))
       for (k in this.events_published[eventname][entry.id]['{}']['params'])
         if (!(k in params))
           params[k] = this.events_published[eventname][entry.id]['{}']['params'][k];
     
-    this.__entry_event_publish_store(entry, eventname, params_key, data, time, event_params_keys);
+    this.__entry_event_publish_store(entry, eventname, keys_index, data, time, event_keys);
     
-    // If this is an empty params_key, i must pass data to other stored data with params_key (i can ignore temporary data)
-    if (params_key == '{}' && eventname in this.events_published && entry.id in this.events_published[eventname])
-      for (let params_key2 in this.events_published[eventname][entry.id])
-        if (params_key2 != '{}' && !params_key2.startsWith("T:")) {
-          let data2 = { 'name': eventname, 'time': time, 'params': deepcopy(params), 'changed_params': {}, 'keys': this.events_published[eventname][entry.id][params_key2]['keys'] }
-          this.__entry_event_publish_store(entry, eventname, params_key2, data2, time, event_params_keys);
+    // If this is an empty keys_index, i must pass data to other stored data with keys_index (i can ignore temporary data)
+    if (keys_index == '{}' && eventname in this.events_published && entry.id in this.events_published[eventname])
+      for (let keys_index2 in this.events_published[eventname][entry.id])
+        if (keys_index2 != '{}' && !this.entry_event_keys_index_is_temporary(keys_index2)) {
+          let data2 = { 'name': eventname, 'time': time, 'params': deepcopy(params), 'changed_params': {}, 'keys': this.events_published[eventname][entry.id][keys_index2]['keys'] }
+          this.__entry_event_publish_store(entry, eventname, keys_index2, data2, time, event_keys);
         }
     
     return data;
   }
 
-  this.__entry_event_publish_store = function(entry, eventname, params_key, data, time, event_params_keys) {
+  this.__entry_event_publish_store = function(entry, eventname, keys_index, data, time, event_keys) {
     // Extract changed params (from previous event detected)
-    if (eventname in this.events_published && entry.id in this.events_published[eventname] && params_key in this.events_published[eventname][entry.id]) {
+    if (eventname in this.events_published && entry.id in this.events_published[eventname] && keys_index in this.events_published[eventname][entry.id]) {
       for (let k in data['params'])
-        if (!(k in event_params_keys) && (!(k in this.events_published[eventname][entry.id][params_key]['params']) || data['params'][k] != this.events_published[eventname][entry.id][params_key]['params'][k]))
+        if (!(k in event_keys) && (!(k in this.events_published[eventname][entry.id][keys_index]['params']) || data['params'][k] != this.events_published[eventname][entry.id][keys_index]['params'][k]))
           data['changed_params'][k] = data['params'][k];
-      for (let k in this.events_published[eventname][entry.id][params_key]['params'])
+      for (let k in this.events_published[eventname][entry.id][keys_index]['params'])
         if (!(k in data['params']))
-          data['params'][k] = this.events_published[eventname][entry.id][params_key]['params'][k]
+          data['params'][k] = this.events_published[eventname][entry.id][keys_index]['params'][k]
     } else
       for (let k in data['params'])
-        if (!(k in event_params_keys))
+        if (!(k in event_keys))
           data['changed_params'][k] = data['params'][k];
 
     if (!(eventname in this.events_published))
@@ -1231,9 +1243,9 @@ AutomatoSystem = function(caller_context) {
     if (!(entry.id in this.events_published[eventname]))
       this.events_published[eventname][entry.id] = {};
     if (time < 0 || (!isinstance(data['params'], 'dict') || !('temporary' in data['params']) || !data['params']['temporary']))
-      this.events_published[eventname][entry.id][params_key] = data;
+      this.events_published[eventname][entry.id][keys_index] = data;
     else if ('temporary' in data['params'] && data['params']['temporary'])
-      this.events_published[eventname][entry.id]["T:" + params_key] = data;
+      this.events_published[eventname][entry.id][this.entry_event_keys_index(data['keys'], true)] = data;
     
     return data;
   }
@@ -1241,23 +1253,23 @@ AutomatoSystem = function(caller_context) {
   this.event_get_invalidate_on_action = function(entry, action, full_params, if_event_not_match_decoded = null) {
     // Devo invalidare dalla cache di event_get tutti gli eventi che potrebbero essere interessati da questo action
     // 1. Se ho if_event_not_match mi baso sul "condition" impostato li per il reset. Se condition non c'è, deve resettare tutte le cache dell'evento
-    // 2. Altrimenti prendo i params della action prima di trasformarli nel payload (quindi dopo aver applicat init e actiondef['init']), prendo solo gli "ENTRY_EVENT_PARAMS_KEYS" e li trasformo in una condition. Anche qui, se non ci sono dati utili la condition è vuota e resetta tutto.
-    // ATTENZIONE: Se la gestione di 'port' o 'channel' (o altri event_params_keys) avviene direttamente nella definizione della action (quindi non dentro degli init, o nei parametri passati alla action, ma nel codice js che trasforma parametri in payload) non posso rilevarli e quindi la cache invalida tutto (e non solo i parametri interessati)
+    // 2. Altrimenti prendo i params della action prima di trasformarli nel payload (quindi dopo aver applicat init e actiondef['init']), prendo solo gli "EVENT_KEYS" e li trasformo in una condition. Anche qui, se non ci sono dati utili la condition è vuota e resetta tutto.
+    // ATTENZIONE: Se la gestione di 'port' o 'channel' (o altri event_keys) avviene direttamente nella definizione della action (quindi non dentro degli init, o nei parametri passati alla action, ma nel codice js che trasforma parametri in payload) non posso rilevarli e quindi la cache invalida tutto (e non solo i parametri interessati)
     
     let eventname = this.transform_action_name_to_event_name(action);
-    let condition = null, event_params_keys = null;
+    let condition = null, event_keys = null;
     if (eventname in this.events_published && entry.id in this.events_published[eventname]) {
       if (if_event_not_match_decoded)
         condition = if_event_not_match_decoded['condition'];
       else {
-        event_params_keys = eventname in entry.events_keys ? entry.events_keys[eventname] : ('event_params_keys' in entry.definition ? entry.definition['event_params_keys'] : ENTRY_EVENT_PARAMS_KEYS);
-        condition = full_params ? Object.entries(full_params).map(function(v) { return event_params_keys.includes(v[0]) ? "params['" + v[0] + "'] == " + JSON.stringify(v[1]) : null }).filter(function(v) { return v; }).join(" && ") : "";
+        event_keys = this.entry_event_keys(entry, eventname);
+        condition = full_params ? Object.entries(full_params).map(function(v) { return event_keys.includes(v[0]) ? "params['" + v[0] + "'] == " + JSON.stringify(v[1]) : null }).filter(function(v) { return v; }).join(" && ") : "";
       }
 
       let to_delete = []
-      for (let params_key in this.events_published[eventname][entry.id])
-        if (!condition || this._entry_event_params_match_condition(this.events_published[eventname][entry.id][params_key], condition))
-          to_delete.push(params_key);
+      for (let keys_index in this.events_published[eventname][entry.id])
+        if (!condition || this._entry_event_params_match_condition(this.events_published[eventname][entry.id][keys_index], condition))
+          to_delete.push(keys_index);
       for (let i in to_delete) {
         i = to_delete[i];
         delete this.events_published[eventname][entry.id][i];
@@ -1704,14 +1716,14 @@ AutomatoSystem = function(caller_context) {
     @param keys List of event params names to get. Use "_time" as param name to get event time
     @param timeout null or a duration
     */
-    let entry_id = isinstance(entry_or_id, 'str') ? this.entry_id_find(entry_or_id) : entry.id;
+    let entry_id = isinstance(entry_or_id, 'str') ? this.entry_id_find(entry_or_id) : entry_or_id.id;
     
     let match = null;
     if (eventname in this.events_published && entry_id in this.events_published[eventname])
-      for (let params_key in this.events_published[eventname][entry_id]) {
-        let t = params_key.startsWith("T:");
+      for (let keys_index in this.events_published[eventname][entry_id]) {
+        let t = this.entry_event_keys_index_is_temporary(keys_index);
         if ((t && temporary) || (!t && !temporary)) {
-          let e = this.events_published[eventname][entry_id][params_key];
+          let e = this.events_published[eventname][entry_id][keys_index];
           if ((timeout == null || this.time() - e['time'] <= read_duration(timeout)) && (condition == null || _entry_event_params_match_condition(e, condition)) && (!match || e['time'] > match['time']))
             match = e;
         }
@@ -1744,10 +1756,10 @@ AutomatoSystem = function(caller_context) {
     let res = {}
     let entry = !isinstance(entry_or_id, 'str') ? entry_or_id : this.entry_get(entry_or_id);
     for (eventname in entry.events) {
-      res[eventname] = []
+      res[eventname] = {}
       if (eventname in this.events_published && entry.id in this.events_published[eventname])
-        for (let params_key in this.events_published[eventname][entry.id])
-          res[eventname].push(this.events_published[eventname][entry.id][params_key]);
+        for (let keys_index in this.events_published[eventname][entry.id])
+          res[eventname][keys_index] = this.events_published[eventname][entry.id][keys_index];
     }
     return res;
   }
@@ -1763,19 +1775,19 @@ AutomatoSystem = function(caller_context) {
       for (let eventname in data[entry_id])
         for (let eventdata of data[entry_id][eventname]) {
           let temporary = ("temporary" in eventdata['params']) && eventdata['params']['temporary'];
-          let params_key = (temporary ? "T:" : "") + json_sorted_encode('keys' in eventdata ? eventdata['keys'] : {});
+          let keys_index = this.entry_event_keys_index('keys' in eventdata ? eventdata['keys'] : {}, temporary);
           if (!(eventname in this.events_published))
             this.events_published[eventname] = {};
           if (!(entry_id in this.events_published[eventname]))
             this.events_published[eventname][entry_id] = {};
-          let prevdata = params_key in this.events_published[eventname][entry_id] ? this.events_published[eventname][entry_id][params_key] : null;
+          let prevdata = keys_index in this.events_published[eventname][entry_id] ? this.events_published[eventname][entry_id][keys_index] : null;
           let go = mode == 3 || !prevdata || (prevdata.time <= 0 && eventdata.time > 0);
           if (!go && mode == 1)
             go = eventdata.time >= prevdata.time;
           if (!go && mode == 2)
             go = eventdata.time > 0;
           if (go) {
-            this.events_published[eventname][entry_id][params_key] = eventdata;
+            this.events_published[eventname][entry_id][keys_index] = eventdata;
             if (eventdata['time'] >= 0 && !temporary)
               this._entry_event_invoke_listeners(this.entry_get(entry_id), eventdata, 'import');
           }
