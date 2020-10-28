@@ -1773,9 +1773,10 @@ AutomatoSystem = function(caller_context) {
      */
     for (let entry_id in data)
       for (let eventname in data[entry_id])
-        for (let eventdata of data[entry_id][eventname]) {
+        for (let keys_index in data[entry_id][eventname]) {
+          let eventdata = data[entry_id][eventname][keys_index];
           let temporary = ("temporary" in eventdata['params']) && eventdata['params']['temporary'];
-          let keys_index = this.entry_event_keys_index('keys' in eventdata ? eventdata['keys'] : {}, temporary);
+          //let keys_index = this.entry_event_keys_index('keys' in eventdata ? eventdata['keys'] : {}, temporary);
           if (!(eventname in this.events_published))
             this.events_published[eventname] = {};
           if (!(entry_id in this.events_published[eventname]))
