@@ -378,10 +378,10 @@ AutomatoSystem = function(caller_context) {
         h(loaded, initial);
 
     for ([entry_id, entry] of Object.entries(loaded)) {
-      this._entry_definition_normalize(entry, 'loaded');
-      this._entry_definition_normalize(entry, 'init');
       this._entry_events_install(entry);
       this._entry_actions_install(entry);
+      this._entry_definition_normalize(entry, 'loaded');
+      this._entry_definition_normalize(entry, 'init');
       
       this._entry_add_to_index(entry);
       
@@ -444,13 +444,6 @@ AutomatoSystem = function(caller_context) {
         if ('publish' in entry.definition['subscribe'][t] && !('response' in entry.definition['subscribe'][t]))
           entry.definition['subscribe'][t]['response'] = entry.definition['subscribe'][t]['publish'];
 
-      // events_passthrough translates in event_propagation via on/events definition
-      if ('events_passthrough' in entry.definition)
-        if (isinstance(entry.definition['events_passthrough'], 'str'))
-          entry.definition['events_passthrough'] = [ entry.definition['events_passthrough'] ];
-        for (let eventref in entry.definition['events_passthrough'])
-          this.on_event(entry.definition['events_passthrough'][eventref], this._on_events_passthrough_listener_lambda(entry), entry, 'events_passthrough');
-    
     } else if (phase == 'init') {
       for (let k of ['qos', 'retain'])
         if (k in entry.definition)
@@ -499,13 +492,22 @@ AutomatoSystem = function(caller_context) {
     }
   }
   
-  this._on_events_passthrough_listener_lambda = function(source_entry) {
+  this._on_events_passthrough_listener_lambda = function(dest_entry, passthrough_conf) {
     let this_system = this;
-    return function(entry, eventname, eventdata) { return this_system._on_events_passthrough_listener(source_entry, entry, eventname, eventdata) };
+    return function(entry, eventname, eventdata) { return this_system._on_events_passthrough_listener(entry, eventname, eventdata, dest_entry, passthrough_conf) };
   }
     
-  this._on_events_passthrough_listener = function(source_entry, entry, eventname, eventdata) {
-    this._entry_event_publish_and_invoke_listeners(source_entry, eventname, eventdata['params'], eventdata['time'], '#events_passthrough');
+  this._on_events_passthrough_listener = function(source_entry, eventname, eventdata, dest_entry, passthrough_conf) {
+    let params = deepcopy(eventdata['params']);
+    if (passthrough_conf['remove_keys'] && ('keys' in eventdata)) {
+      for (let k in eventdata['keys'])
+        delete params[k];
+    }
+    if ('init' in passthrough_conf) {
+      let context = scripting_js.script_context({ 'params': params });
+      scripting_js.script_exec(passthrough_conf['init'], context);
+    }
+    this._entry_event_publish_and_invoke_listeners(dest_entry, ("rename" in passthrough_conf) && passthrough_conf["rename"] ? passthrough_conf["rename"] : eventname, params, eventdata['time'], '#events_passthrough');
   }
 
   /*
@@ -541,6 +543,11 @@ AutomatoSystem = function(caller_context) {
   }
   
   this._entry_remove_from_index = function(entry) {
+    // *!*!* DEBUG (code only in js version for debug purpose)
+    if (!entry.definition_exportable) {
+      console.warn('Invalid entry in _entry_remove_from_index', entry);
+      return false;
+    }
     for (let topic in entry.definition_exportable['publish'])
       this._entry_remove_from_index_topic_published(entry, topic);
     for (let topic in entry.definition_exportable['subscribe'])
@@ -1198,7 +1205,7 @@ AutomatoSystem = function(caller_context) {
     /*
     Given an event generated (by a published messaged, or by an event passthrough), process it's params to generate event data and store it's content in this.events_published history var
     Note: if an event has no "event_keys", it's data will be setted to all other stored data (of events with keys_index). If a new keys_index occours, the data will be merged with "no params-key" data.
-    @param time timestamp event has been published, 0 if from a retained message, -1 if from an event data initialization
+    @param time timestamp event has been published, 0 if from a retained message, -1 if from an event data initialization, -X if from a stored event data (X is the original time)
     */
     let data = { 'name': eventname, 'time': time, 'params': params, 'changed_params': {}, 'keys': {} };
     let event_keys = this.entry_event_keys(entry, eventname);
@@ -1225,6 +1232,11 @@ AutomatoSystem = function(caller_context) {
   }
 
   this.__entry_event_publish_store = function(entry, eventname, keys_index, data, time, event_keys) {
+    if (!(eventname in entry.events)) {
+      entry.events[eventname] = ['?'];
+      console.warn("Generated an event not declared by the entry, added now to the declaration. Entry: {entry}, event: {eventname}".format({entry: entry.id, eventname: eventname}));
+    }
+    
     // Extract changed params (from previous event detected)
     if (eventname in this.events_published && entry.id in this.events_published[eventname] && keys_index in this.events_published[eventname][entry.id]) {
       for (let k in data['params'])
@@ -1310,11 +1322,8 @@ AutomatoSystem = function(caller_context) {
   this._entry_event_publish_and_invoke_listeners = function(entry, eventname, params, time, caller) {
     // @param caller is "#events_passthrough" in case of events_passthrough
     let eventdata = this._entry_event_publish(entry, eventname, params, time);
-    this._entry_event_invoke_listeners(entry, eventdata, caller)
+    this._entry_event_invoke_listeners(entry, eventdata, caller);
   }
-
-
-
 
   this.entry_topic_lambda = function(entry) {
     return function(topic) { return this.entry_topic(entry, topic) };
@@ -1529,6 +1538,26 @@ AutomatoSystem = function(caller_context) {
               this._entry_event_publish(entry, eventname.slice(0, -5), eventparams, -1);
           }
         }
+        
+    // events_passthrough translates in event_propagation via on/events definition
+    if ('events_passthrough' in entry.definition)
+      if (isinstance(entry.definition['events_passthrough'], 'str'))
+        entry.definition['events_passthrough'] = [ entry.definition['events_passthrough'] ];
+      for (let eventref in entry.definition['events_passthrough']) {
+        let ep = entry.definition['events_passthrough'][eventref];
+        if (isinstance(ep, 'str'))
+          ep = { "on": ep };
+        if (!("remove_keys" in ep))
+          ep["remove_keys"] = true;
+        this.on_event(ep["on"], this._on_events_passthrough_listener_lambda(entry, ep), entry, 'events_passthrough');
+        let eventname = "rename" in ep ? ep["rename"] : null;
+        if (!eventname) {
+          let ref = this.decode_event_reference(ep["on"]);
+          eventname = ref['event'];
+        }
+        if (eventname && !(eventname in entry.events))
+          entry.events[eventname] = ['#passthrough'];
+      }
   }
 
   this._entry_actions_load = function(entry) {
@@ -1549,8 +1578,10 @@ AutomatoSystem = function(caller_context) {
             entry.actions[actionname].push(topic);
           } else if (actionname.endsWith(":init")) {
             let data = isinstance(entry.definition['subscribe'][topic]['actions'][actionname], 'list') ? entry.definition['subscribe'][topic]['actions'][actionname] : [ entry.definition['subscribe'][topic]['actions'][actionname] ];
-            for (let eventparams of data) 
+            for (let eventparams of data) {
+              entry.events['action/' + actionname.slice(0, -5)] = [ '#action' ];
               this._entry_event_publish(entry, 'action/' + actionname.slice(0, -5), eventparams, -1);
+            }
           }
         }
   }
@@ -1764,12 +1795,17 @@ AutomatoSystem = function(caller_context) {
     return res;
   }
   
-  this.events_import = function(data, mode = 0) {
+  this.events_import = function(data, import_mode = 0, invoke_mode = 2) {
     /*
-     * @param mode = 0 only import events not present, or with time = -1|0
-     * @param mode = 1 ... also events with time >= than the one in memory
-     * @param mode = 2 ... also all events with time > 0
-     * @param mode = 3 import all events (even if time = 0)
+     * @param import_mode = -1 only import events not present, or with time = -1, and set the time as -time [used to import stored events]
+     * @param import_mode = 0 only import events not present, or with time <= 0
+     * @param import_mode = 1 ... also events with time >= than the one in memory
+     * @param import_mode = 2 ... also all events with time > 0
+     * @param import_mode = 3 import all events (even if time = -1|0)
+     * @param invoke_mode = 0 never invoke listeners of imported events
+     * @param invoke_mode = 1 invoke listeners of imported events with time >= 0 (recent events)
+     * @param invoke_mode = 2 invoke listeners of imported events with time != -1 (recent events & stored events, NOT for :init events)
+     * @param invoke_mode = 3 invoke listeners of ALL imported events
      */
     for (let entry_id in data)
       for (let eventname in data[entry_id])
@@ -1782,14 +1818,18 @@ AutomatoSystem = function(caller_context) {
           if (!(entry_id in this.events_published[eventname]))
             this.events_published[eventname][entry_id] = {};
           let prevdata = keys_index in this.events_published[eventname][entry_id] ? this.events_published[eventname][entry_id][keys_index] : null;
-          let go = mode == 3 || !prevdata || (prevdata.time <= 0 && eventdata.time > 0);
-          if (!go && mode == 1)
-            go = eventdata.time >= prevdata.time;
-          if (!go && mode == 2)
-            go = eventdata.time > 0;
+          let go = import_mode == 3 || !prevdata || (prevdata['time'] == -1 && eventdata['time'] > 0);
+          if (!go && import_mode == 0)
+            go = prevdata['time'] <= 0 && eventdata['time'] > 0
+          if (!go && import_mode == 1)
+            go = eventdata['time'] >= prevdata['time'];
+          if (!go && import_mode == 2)
+            go = eventdata['time'] > 0;
           if (go) {
+            if (import_mode == -1 && eventdata['time'] > 0)
+              eventdata['time'] = - eventdata['time'];
             this.events_published[eventname][entry_id][keys_index] = eventdata;
-            if (eventdata['time'] >= 0 && !temporary)
+            if (!temporary && invoke_mode > 0 && (invoke_mode == 3 || (invoke_mode == 2 && eventdata['time'] != -1) || (invoke_mode == 1 && eventdata['time'] >= 0)))
               this._entry_event_invoke_listeners(this.entry_get(entry_id), eventdata, 'import');
           }
         }
