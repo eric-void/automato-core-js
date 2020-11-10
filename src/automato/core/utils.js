@@ -240,15 +240,15 @@ function callable(h) {
 /**
  * For other methods see https://medium.com/javascript-in-plain-english/how-to-deep-copy-objects-and-arrays-in-javascript-7c911359b089
  */
-function deepcopy(v) {
-  if (typeof v !== "object" || v === null)
+function deepcopy(v, max_depth = 2) {
+  if (typeof v !== "object" || v === null || max_depth == 0)
     return v;
 
   // Create an array or object to hold the values
   let res = Array.isArray(v) ? [] : {}
 
   for (k in v)
-    res[k] = deepcopy(v[k]);
+    res[k] = deepcopy(v[k], max_depth - 1);
 
   return res;
 }
