@@ -1411,7 +1411,7 @@ AutomatoSystem = function(caller_context) {
             if (rtopic_rule.indexOf("{") >= 0)
               for (let i in r['matches'])
                 rtopic_rule = rtopic_rule.replace("{matches[" + i + "]}", "" + r['matches'][i]);
-            s['listeners'].push({ 'topic_rule': rtopic_rule, 'expiry': timems() + ('duration' in t ? read_duration(t['duration']) : default_duration) * 1000, 'count': 'count' in t ? t['count'] : default_count });
+            s['listeners'].push({ 'topic_rule': rtopic_rule, 'expiry': timems() + ('duration' in t ? read_duration(t['duration']) : default_duration) * 1000, 'count': 0, 'max_count': 'count' in t ? t['count'] : default_count });
           }
     }
     
@@ -1439,15 +1439,15 @@ AutomatoSystem = function(caller_context) {
     for (let x of this.subscribed_response.values()) {
       let do_remove = false;
       for (let l of x['listeners'].values())
-        if (l['expiry'] + delay > now && l['count'] > 0) {
+        if (l['expiry'] + delay > now && (l['count'] == 0 || l['count'] < l['max_count'])) {
           //TODO Gestire una cache di qualche tipo (qui ho bisogno solo di sapere che c'è il match, quindi basterebbe una cache di topic_matches)
           let matches = this.topic_matches(l['topic_rule'], message.topic, message.payload);
           if (matches['matched']) {
-            l['count'] = l['count'] - 1;
-            let final = false;
+            l['count'] = l['count'] + 1;
+            let final = true;
             for (let m of x['listeners'].values())
-              if (m['count'] > 0) {
-                final = true;
+              if (m['count'] > 0 && m['max_count'] > 0) {
+                final = false;
                 break;
               }
             if (x['callback'])
@@ -1458,7 +1458,7 @@ AutomatoSystem = function(caller_context) {
         } else
           do_remove = true;
       if (do_remove)
-        x['listeners'] = x['listeners'].filter(function(l) {return l['expiry'] + delay > now && l['count'] > 0  });
+        x['listeners'] = x['listeners'].filter(function(l) {return l['expiry'] + delay > now && (l['count'] == 0 || l['count'] < l['max_count']) });
     }
   }
 
