@@ -63,6 +63,50 @@ function sorted_dict(data) {
   return Object.fromEntries(Object.entries(data).sort(function(a, b) { return a[0] > b[0] ? 1 : (a[0] == b[0] ? 0 : -1); }));
 }
 
+/**
+ * JSON-compliant json stringify
+ * No exception is thrown: if v is invalid, an error will be logged and None is returned
+ */
+function json_export(v) {
+  try {
+    return JSON.stringify(v);
+  } catch (e) {
+    console.error(e);
+    return null;
+  }
+}
+
+/*
+ * JSON-compliant json parse: no "NaN" (or other constant) is accepted (if NaN is in input, we'll try to convert it to None/null)
+ * No exception is thrown: if v is invalid, an error will be logged and None is returned
+ */
+function json_import(v) {
+  try {
+    return JSON.parse(v);
+  } catch (e) {
+    if (v.match(/\bNaN\b/))
+      try {
+        return JSON.parse(v.replace(/\bNaN\b/g, 'null'));
+      } catch (e) {
+        console.error(e);
+      }
+    else {
+      console.error(e);
+    }
+  }
+  return null;
+}
+
+function nan_remove(v) {
+  if (isinstance(v, 'list') || isinstance(v, 'dict')) {
+    for (let k in v)
+      v[k] = nan_remove(v[k]);
+  }
+  else if (isNaN(v))
+    v = null;
+  return v
+}
+
 function json_sorted_encode(data) {
   if (!isinstance(data, 'dict'))
     return data;
@@ -76,7 +120,7 @@ function b64_compress_data(data) {
    * Compress and base-64 encode data
    * NEEDS: pako (deflate) zlib library
    */
-  return btoa(pako.deflate(JSON.stringify(data), {'to': 'string'}));
+  return btoa(pako.deflate(json_export(data), {'to': 'string'}));
 }
 
 function b64_decompress_data(string) {
@@ -84,7 +128,7 @@ function b64_decompress_data(string) {
    * Compress and base-64 encode data
    * NEEDS: pako (inflate) zlib library
    */
-  return JSON.parse(pako.inflate(atob(string), {to: 'string'}));
+  return json_import(pako.inflate(atob(string), {to: 'string'}));
 }
 
 function round(v, decimals = 0) {

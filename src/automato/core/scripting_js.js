@@ -75,7 +75,7 @@ function AutomatoScriptingJs(system, caller_context) {
             for (let y in context[x])
               contextkey[x][y] = '';
           }
-        let codecontext_signature = "CODE:" + code + ",CONTEXT:" + JSON.stringify(contextkey);
+        let codecontext_signature = "CODE:" + code + ",CONTEXT:" + json_export(contextkey);
 
         if (!(codecontext_signature in this.script_eval_codecontext_signatures)) {
           // This struct contains the usage of context keys (first and second level) in the code. If a key is present, with value '', that key is used in the code as is. If not present, it's not used. If it's a dict, it reflects the usage of subkeys.
@@ -92,7 +92,7 @@ function AutomatoScriptingJs(system, caller_context) {
               }
         }
         
-        //OBSOLETE: let key = "CONTEXT: " + JSON.stringify(Object.fromEntries(Object.entries(context).sort(function(a, b) { return a[0] > b[0] ? 1 : (a[0] == b[0] ? 0 : -1); }))) + ",CODE:" + code;
+        //OBSOLETE: let key = "CONTEXT: " + json_export(Object.fromEntries(Object.entries(context).sort(function(a, b) { return a[0] > b[0] ? 1 : (a[0] == b[0] ? 0 : -1); }))) + ",CODE:" + code;
         let key = {}
         for (let x in context_sorted)
           if (x in this.script_eval_codecontext_signatures[codecontext_signature]) {
@@ -105,7 +105,7 @@ function AutomatoScriptingJs(system, caller_context) {
                   key[x][y] = context[x][y];
             }
           }
-        key = "CONTEXT:" + JSON.stringify(key) + ",CODE:" + code;
+        key = "CONTEXT:" + json_export(key) + ",CODE:" + code;
         
         let keyhash = MD5(key);
         if (keyhash in this.script_eval_cache && this.script_eval_cache[keyhash]['key'] == key) {

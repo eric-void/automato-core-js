@@ -1263,7 +1263,7 @@ AutomatoSystem = function(caller_context) {
         condition = if_event_not_match_decoded['condition'];
       else {
         event_keys = this.entry_event_keys(entry, eventname);
-        condition = full_params ? Object.entries(full_params).map(function(v) { return event_keys.includes(v[0]) ? "params['" + v[0] + "'] == " + JSON.stringify(v[1]) : null }).filter(function(v) { return v; }).join(" && ") : "";
+        condition = full_params ? Object.entries(full_params).map(function(v) { return event_keys.includes(v[0]) ? "params['" + v[0] + "'] == " + json_export(v[1]) : null }).filter(function(v) { return v; }).join(" && ") : "";
       }
 
       let to_delete = []
@@ -1739,7 +1739,7 @@ AutomatoSystem = function(caller_context) {
             return v;
           res.push(v);
         }
-      return res;
+      return nan_remove(res);
     }
 
     return keys == null || len(keys) == 1 ? null : Array(keys.length).fill(null);
@@ -1840,7 +1840,7 @@ AutomatoSystem = function(caller_context) {
     let condition = '';
     if ('keys' in eventdata && eventdata['keys']) {
       for (k in eventdata['keys'])
-        condition = condition + (condition ? ' && ' : '') + 'params["' + k + '"] == ' + JSON.stringify(eventdata['keys'][k]);
+        condition = condition + (condition ? ' && ' : '') + 'params["' + k + '"] == ' + json_export(eventdata['keys'][k]);
       condition = '(js: ' + condition + ')';
     }
     return entry_id + '.' + eventname + condition;

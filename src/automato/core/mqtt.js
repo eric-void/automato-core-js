@@ -227,7 +227,7 @@ AutomatoMqtt = function(system) {
   this._decodePayload = function(v) {
     if (typeof(v) == "string" && v.length && (v[0] == '{' || v[0] == '['))
       try {
-        return JSON.parse(v);
+        return json_import(v);
       } catch (e) {
       }
     //f = parseFloat(v)
@@ -265,7 +265,7 @@ AutomatoMqtt = function(system) {
 
   this.publish = function(topic, payload, qos = 0, retain = false) {
     if (typeof payload != "string" && payload != null)
-      payload = JSON.stringify(payload);
+      payload = json_export(payload);
     if (this.connected == 0) {
       if (this.settings['publish_before_connection_policy'] == 'connect') {
         console.debug("connecting broker and publishing {topic} (qos = {qos}, retain = {retain})".format({topic: topic, qos: qos, retain: retain}));
