@@ -1829,8 +1829,11 @@ AutomatoSystem = function(caller_context) {
             if (import_mode == -1 && eventdata['time'] > 0)
               eventdata['time'] = - eventdata['time'];
             this.events_published[eventname][entry_id][keys_index] = eventdata;
-            if (!temporary && invoke_mode > 0 && (invoke_mode == 3 || (invoke_mode == 2 && eventdata['time'] != -1) || (invoke_mode == 1 && eventdata['time'] >= 0)))
-              this._entry_event_invoke_listeners(this.entry_get(entry_id), eventdata, 'import');
+            if (!temporary && invoke_mode > 0 && (invoke_mode == 3 || (invoke_mode == 2 && eventdata['time'] != -1) || (invoke_mode == 1 && eventdata['time'] >= 0))) {
+              let _e = this.entry_get(entry_id);
+              if (_e)
+                this._entry_event_invoke_listeners(_e, eventdata, 'import');
+            }
           }
         }
   }
