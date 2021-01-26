@@ -59,6 +59,7 @@ AutomatoSystem = function(caller_context) {
   }
 
   this.boot = function() {
+    this.destroyed = false;
     // TODO JS: UNSUPPORTED system_extra.init_locale(this.config);
     // TODO JS: UNSUPPORTED system_extra.init_logging(this.config);
     this._reset();
@@ -81,9 +82,24 @@ AutomatoSystem = function(caller_context) {
   }
   
   this._reset = function() {
+    this.all_entries = {};
+    this.all_entries_signatures = {};
+    
+    this.all_nodes = {};
+    this.exports = {};
+    this.subscriptions = {};
+    this.last_entry_and_events_for_received_mqtt_message = null;
+    this.events_listeners = {};
+    this.events_published = {};
+    // this.events_published_lock = null; # TODO Thread locking in js class is disabled
+    this.index_topic_published = {};
+    this.index_topic_subscribed = {};
+    scripting_js.exports = this.exports;
+
     this.handler_on_entry_load = [];
-    this.handler_on_entry_install = [];
-    this.handler_on_loaded = [];
+    this.handler_on_entry_unload = [];
+    this.handler_on_entry_init = [];
+    this.handler_on_entries_change = [];
     this.handler_on_initialized = [];
     this.handler_on_message = [];
     this.handler_on_all_events = [];
@@ -93,14 +109,21 @@ AutomatoSystem = function(caller_context) {
     this.handler_on_entry_load.push(handler);
   }
 
-  this.on_entry_install = function(handler) {
-    this.handler_on_entry_install.push(handler);
+  this.on_entry_unload = function(handler) {
+    this.handler_on_entry_unload.push(handler);
   }
 
-  this.on_loaded = function(handler) {
-    this.handler_on_loaded.push(handler);
+  this.on_entry_init = function(handler) {
+    this.handler_on_entry_init.push(handler);
   }
 
+  /**
+   * @param handler (entry_ids_loaded, entry_ids_unloaded)
+   */
+  this.on_entries_change = function(handler) {
+    this.handler_on_entries_change.push(handler);
+  }
+  
   this.on_initialized = function(handler) {
     this.handler_on_initialized.push(handler);
   }
@@ -119,28 +142,15 @@ AutomatoSystem = function(caller_context) {
   }
 
   this.init = function(callback) {
-    this.destroyed = false;
-    this.all_entries = {};
-    this.all_nodes = {};
-    this.exports = {};
-    this.subscriptions = {};
-    this.last_entry_and_events_for_received_mqtt_message = null;
-    this.events_listeners = {};
-    this.events_published = {};
-    // this.events_published_lock = null; # TODO Thread locking in js class is disabled
-    this.index_topic_published = {};
-    this.index_topic_subscribed = {};
     this.topic_cache_reset();
     this.default_node_name ='name' in this.config ? this.config['name'] : 'root';
-    
-    scripting_js.exports = this.exports;
     
     this.subscribed_response = [];
     this.subscription_thread = thread_start(this._subscription_timer_thread.bind(this), false);
     
     notifications.init();
     
-    this.entry_load_definitions(this.config['entries'], /*initial = */this.default_node_name, true, false, /*id_from_definition = */true);
+    this.entry_load_definitions(this.config['entries'], /*initial = */this.default_node_name, true, false, /*id_from_definition = */true, /*generate_new_entry_id_on_conflict = */ true);
 
     if (this.handler_on_initialized)
       for (let h of this.handler_on_initialized.values())
@@ -150,8 +160,12 @@ AutomatoSystem = function(caller_context) {
       this._mqtt_connect_callback(callback, phase);
     }.bind(this));
   }
+  
 
   this.destroy = function() {
+    for (entry_id in this.all_entries)
+      this.entry_unload(entry_id);
+      
     this.destroyed = true;
     notifications.destroy();
     thread_end(this.subscription_thread);
@@ -290,70 +304,122 @@ AutomatoSystem = function(caller_context) {
       definition['type'] = 'device' in definition ? 'device' : ('module' in definition ? 'module' : 'item');
     this.type = definition['type'];
     this.definition = definition;
-    this.caption = 'caption' in this.definition ? this.definition['caption'] : this.id_local;
+    this.definition_loaded = deepcopy(definition, 5);
     this.created = system.time();
     this.last_seen = 0;
     this.exports = system.exports;
     this.topic_rule_aliases = {};
     this.topic = system.entry_topic_lambda(this).bind(system);
     this.publish = system.entry_publish_lambda(this).bind(system);
+    
+    // Call this when entry.definition changes (should happen only during entry_load phase)
+    this._refresh_definition_based_properties = function() {
+      this.config = 'config' in this.definition ? this.definition['config'] : {};
+      this.caption = 'caption' in this.definition ? this.definition['caption'] : this.id_local;
+    }
+    
+    this._refresh_definition_based_properties();
   }
 
-  this.entry_load = function(definition, node_name = false, entry_id = false, replace_if_exists = true) {
-    if (!node_name)
-      node_name = this.default_node_name;
-    
-    if (!entry_id) {
-      let definition_id = 'id' in definition ? definition['id'] : ('item' in definition ? definition['item'] : ('module' in definition ? definition['module'] : ('device' in definition ? definition['device'] : (''))));
-      let d = definition_id.indexOf("@");
-      if (d < 0) {
-        entry_id = definition_id.replace(/[^A-Za-z0-9_-]+/g, '-');
-        i = 0;
-        while (entry_id + '@' + node_name in this.all_entries)
-          entry_id = (definition_id + '_' + (++ i)).replace(/[^A-Za-z0-9_-]+/g, '-');
-        entry_id = entry_id + '@' + node_name;
-      } else
-        entry_id = definition_id;
+  this.entry_load = function(definition, from_node_name = false, entry_id = false, generate_new_entry_id_on_conflict = false, call_on_entries_change = true) {
+    if (!isinstance(definition, 'dict'))
+      return null;
+
+    if (!from_node_name) {
+      let d = entry_id ? entry_id.indexOf("@") : -1;
+      from_node_name = d >= 0 ? entry_id.slice(d + 1) : this.default_node_name;
     }
+    
+    if (!entry_id)
+      entry_id = 'id' in definition ? definition['id'] : ('item' in definition ? definition['item'] : ('module' in definition ? definition['module'] : ('device' in definition ? definition['device'] : (''))));
+    if (!entry_id)
+      return null;
+    entry_id = entry_id.replace(/[^A-Za-z0-9@_-]+/g, '-');
+    let d = entry_id.indexOf("@");
+    if (d < 0)
+      entry_id = entry_id + '@' + from_node_name;
+    
+    if (generate_new_entry_id_on_conflict && entry_id in this.all_entries) {
+      d = entry_id.indexOf("@");
+      entry_local_id = entry_id.slice(0, d);
+      entry_node_name = entry_id.slice(d + 1);
+      entry_id = entry_local_id;
+      let i = 0;
+      while (entry_id + '@' + entry_node_name in this.all_entries)
+        entry_id = entry_local_id + '_' + (++ i);
+      entry_id = entry_id + '@' + entry_node_name;
+    }
+
+    let new_signature = data_signature(definition);
     if (entry_id in this.all_entries) {
-      if (!replace_if_exists) {
-        console.error("SYSTEM> Entry id already exists: {entry_id}, entry not loaded".format({entry_id: entry_id}));
+      if (new_signature && this.all_entries_signatures[entry_id] == new_signature)
         return null;
-      } else {
-        console.debug("SYSTEM> Entry id already exists: {entry_id}, replacing it".format({entry_id: entry_id}));
-        this.entry_unload(entry_id);
-      }
+      this.entry_unload(entry_id);
     }
     
     let entry = new this.Entry(this, entry_id, definition, this.config);
+    entry.is_local = entry.node_name == this.default_node_name;
     
     if (this.handler_on_entry_load)
       for (let h of this.handler_on_entry_load.values())
         h(entry);
+      
+    entry._refresh_definition_based_properties();
     
-    if (!isinstance(entry.definition, 'dict'))
-      entry.definition = {};
-    entry.config = 'config' in entry.definition ? entry.definition['config'] : {};
-    
-    this._entry_definition_normalize(entry, 'load');
+    this._entry_definition_normalize_after_load(entry);
     this._entry_events_load(entry);
     this._entry_actions_load(entry);
+    this._entry_events_install(entry);
+    this._entry_actions_install(entry);
+    this._entry_add_to_index(entry);
     
     this.all_entries[entry_id] = entry;
+    this.all_entries_signatures[entry_id] = new_signature;
     if (!(entry.node_name in this.all_nodes))
       this.all_nodes[entry.node_name] = {};
 
+    if (this.handler_on_entry_init)
+      for (let h of this.handler_on_entry_init.values())
+        h(entry);
+      
+  if (call_on_entries_change && this.handler_on_entries_change)
+    for (let h in this.handler_on_entries_change)
+      h([entry.id], []);
+
     return entry;
   }
-
-  this.entry_unload = function(entry_id) {
+    
+  this.entry_unload = function(entry_id, call_on_entries_change = true) {
     if (entry_id in this.all_entries) {
+      if (this.handler_on_entry_unload)
+        for (let h of this.handler_on_entry_unload.values())
+          h(this.all_entries[entry_id]);
+        
+      this.remove_event_listener_by_reference_entry(entry_id);
       this._entry_remove_from_index(this.all_entries[entry_id]);
+      
       delete this.all_entries[entry_id];
+      delete this.all_entries_signatures[entry_id];
+      
+      if (call_on_entries_change && this.handler_on_entries_change)
+        for (let h in this.handler_on_entries_change)
+          h([], [entry_id]);
     }
   }
-
-  this.entry_load_definitions = function(definitions, node_name = false, initial = false, unload_other_from_node = false, id_from_definition = false) {
+  
+  this.entry_reload = function(entry_id, call_on_entries_change = true) {
+    if (entry_id in this.all_entries) {
+      let definition = this.all_entries[entry_id].definition_loaded;
+      this.entry_unload(entry_id, false);
+      this.entry_load(definition, false, entry_id, false, false);
+      
+      if (call_on_entries_change && this.handler_on_entries_change)
+        for (let h in this.handler_on_entries_change)
+          h([entry_id], [entry_id]);
+    }
+  }
+  
+  this.entry_load_definitions = function(definitions, node_name = false, initial = false, unload_other_from_node = false, id_from_definition = false, generate_new_entry_id_on_conflict = false) {
     /*
     @param id_from_definition. If true: definitions = [ { ...definition...} ]; if false: definitions = { 'entry_id': { { ... definition ... } }
     */
@@ -367,37 +433,24 @@ AutomatoSystem = function(caller_context) {
         entry_id = definition;
       definition = definitions[definition];
       if (!('disabled' in definition) || !definition['disabled']) {
-        let entry = this.entry_load(definition, node_name, entry_id);
+        let entry = this.entry_load(definition, node_name, entry_id, generate_new_entry_id_on_conflict);
         if (entry)
           loaded[entry.id] = entry;
       }
     }
 
-    if (this.handler_on_loaded)
-      for (let h of this.handler_on_loaded.values())
-        h(loaded, initial);
-
-    for ([entry_id, entry] of Object.entries(loaded)) {
-      this._entry_events_install(entry);
-      this._entry_actions_install(entry);
-      this._entry_definition_normalize(entry, 'loaded');
-      this._entry_definition_normalize(entry, 'init');
-      
-      this._entry_add_to_index(entry);
-      
-      if (this.handler_on_entry_install)
-        for (let h of this.handler_on_entry_install.values())
-          h(entry);
-    }
-
+    let todo_unload = [];
     if (unload_other_from_node) {
-      let todo_unload = [];
       for (let entry_id in this.all_entries)
         if (this.all_entries[entry_id].node_name == node_name && !(entry_id in loaded))
           todo_unload.push(entry_id);
       for (let entry_id of todo_unload)
         this.entry_unload(entry_id);
     }
+    
+    if (this.handler_on_entries_change)
+      for (let h in this.handler_on_entries_change)
+        h(Object.keys(loaded), todo_unload);
   }
 
   this.entry_unload_node_entries = function(node_name) {
@@ -407,11 +460,20 @@ AutomatoSystem = function(caller_context) {
         todo_unload.push(entry_id);
     for (let entry_id of todo_unload)
       this.entry_unload(entry_id);
+    
+    if (this.handler_on_entries_change)
+      for (let h in this.handler_on_entries_change)
+        h([], todo_unload);
   }
 
   this.entries = function() {
     return this.all_entries;
   }
+  
+  
+  
+  
+  
 
 
 
@@ -422,82 +484,80 @@ AutomatoSystem = function(caller_context) {
    *
    ***************************************************************************************************************************************************************/
 
-  this._entry_definition_normalize = function(entry, phase) {
-    if (phase == 'load') {
-      if (!('publish' in entry.definition))
-        entry.definition['publish'] = {};
-      if (!('subscribe' in entry.definition))
-        entry.definition['subscribe'] = {};
-      if (entry.is_local) {
-        if (!('entry_topic' in entry.definition))
-          entry.definition['entry_topic'] = entry.type + '/' + entry.id_local;
-        if (!('topic_root' in entry.definition))
-          entry.definition['topic_root'] = entry.definition['entry_topic'];
-      }
-      if (!('on' in entry.definition))
-        entry.definition['on'] = {};
-      if (!('events_listen' in entry.definition))
-        entry.definition['events_listen'] = {};
-
-    } else if (phase == 'loaded') {
-      for (let t in entry.definition['subscribe'])
-        if ('publish' in entry.definition['subscribe'][t] && !('response' in entry.definition['subscribe'][t]))
-          entry.definition['subscribe'][t]['response'] = entry.definition['subscribe'][t]['publish'];
-
-    } else if (phase == 'init') {
-      for (let k of ['qos', 'retain'])
-        if (k in entry.definition)
-          for (let topic_rule in entry.definition['publish'])
-            if (!(k in entry.definition['publish'][topic_rule]))
-              entry.definition['publish'][topic_rule][k] = entry.definition[k];
-
-      if ('publish' in entry.definition) {
-        let res = {};
-        for (let topic_rule in entry.definition['publish']) {
-          if ('topic' in entry.definition['publish'][topic_rule])
-            entry.topic_rule_aliases[topic_rule] = entry.topic(entry.definition['publish'][topic_rule]['topic']);
-          res[entry.topic(topic_rule)] = entry.definition['publish'][topic_rule];
-        }
-        entry.definition['publish'] = res;
-      }
-      
-      if ('subscribe' in entry.definition) {
-        let res = {};
-        for (let topic_rule in entry.definition['subscribe']) {
-          if ('topic' in entry.definition['subscribe'][topic_rule])
-            entry.topic_rule_aliases[topic_rule] = entry.topic(entry.definition['subscribe'][topic_rule]['topic']);
-          res[entry.topic(topic_rule)] = entry.definition['subscribe'][topic_rule];
-        }
-        entry.definition['subscribe'] = res;
-
-        for (let topic_rule in entry.definition['subscribe']) {
-          if ('response' in entry.definition['subscribe'][topic_rule]) {
-            res = [];
-            for (let t in entry.definition['subscribe'][topic_rule]['response']) {
-              if (!isinstance(t, 'dict'))
-                t = { 'topic': t };
-              if ('topic' in t && t['topic'] != 'NOTIFY')
-                t['topic'] = entry.topic(t['topic']);
-              res.push(t);
-            }
-            entry.definition['subscribe'][topic_rule]['response'] = res;
-          }
-        }
-      }
-
-      for (let eventref in entry.definition['events_listen'])
-        this.add_event_listener(entry.definition['events_listen'][eventref], entry, 'events_listen');
-
-      notifications.entry_normalize(entry);
+  this._entry_definition_normalize_after_load = function(entry) {
+    if (!('publish' in entry.definition))
+      entry.definition['publish'] = {};
+    if (!('subscribe' in entry.definition))
+      entry.definition['subscribe'] = {};
+    if (!('on' in entry.definition))
+      entry.definition['on'] = {};
+    if (!('events_listen' in entry.definition))
+      entry.definition['events_listen'] = {};
+    
+    if (entry.is_local) {
+      if (!('entry_topic' in entry.definition))
+        entry.definition['entry_topic'] = entry.type + '/' + entry.id_local;
+      if (!('topic_root' in entry.definition))
+        entry.definition['topic_root'] = entry.definition['entry_topic'];
     }
+    
+    for (let t in entry.definition['subscribe'])
+      if ('publish' in entry.definition['subscribe'][t] && !('response' in entry.definition['subscribe'][t]))
+        entry.definition['subscribe'][t]['response'] = entry.definition['subscribe'][t]['publish'];
+
+    for (let k of ['qos', 'retain'])
+      if (k in entry.definition)
+        for (let topic_rule in entry.definition['publish'])
+          if (!(k in entry.definition['publish'][topic_rule]))
+            entry.definition['publish'][topic_rule][k] = entry.definition[k];
+
+    if ('publish' in entry.definition) {
+      let res = {};
+      for (let topic_rule in entry.definition['publish']) {
+        if ('topic' in entry.definition['publish'][topic_rule])
+          entry.topic_rule_aliases[topic_rule] = entry.topic(entry.definition['publish'][topic_rule]['topic']);
+        res[entry.topic(topic_rule)] = entry.definition['publish'][topic_rule];
+      }
+      entry.definition['publish'] = res;
+    }
+    
+    if ('subscribe' in entry.definition) {
+      let res = {};
+      for (let topic_rule in entry.definition['subscribe']) {
+        if ('topic' in entry.definition['subscribe'][topic_rule])
+          entry.topic_rule_aliases[topic_rule] = entry.topic(entry.definition['subscribe'][topic_rule]['topic']);
+        res[entry.topic(topic_rule)] = entry.definition['subscribe'][topic_rule];
+      }
+      entry.definition['subscribe'] = res;
+
+      for (let topic_rule in entry.definition['subscribe']) {
+        if ('response' in entry.definition['subscribe'][topic_rule]) {
+          res = [];
+          for (let t in entry.definition['subscribe'][topic_rule]['response']) {
+            if (!isinstance(t, 'dict'))
+              t = { 'topic': t };
+            if ('topic' in t && t['topic'] != 'NOTIFY')
+              t['topic'] = entry.topic(t['topic']);
+            res.push(t);
+          }
+          entry.definition['subscribe'][topic_rule]['response'] = res;
+        }
+      }
+    }
+
+    for (let eventref in entry.definition['events_listen'])
+      this.add_event_listener(entry.definition['events_listen'][eventref], entry, 'events_listen');
+
+    notifications.entry_normalize(entry);
   }
+  
   
   this._on_events_passthrough_listener_lambda = function(dest_entry, passthrough_conf) {
     let this_system = this;
-    return function(entry, eventname, eventdata) { return this_system._on_events_passthrough_listener(entry, eventname, eventdata, dest_entry, passthrough_conf) };
+    return function(entry, eventname, eventdata, caller, published_message) { return this_system._on_events_passthrough_listener(entry, eventname, eventdata, caller, published_message, dest_entry, passthrough_conf) };
   }
     
-  this._on_events_passthrough_listener = function(source_entry, eventname, eventdata, dest_entry, passthrough_conf) {
+  this._on_events_passthrough_listener = function(source_entry, eventname, eventdata, caller, published_message, dest_entry, passthrough_conf) {
     let params = deepcopy(eventdata['params']);
     if (passthrough_conf['remove_keys'] && ('keys' in eventdata)) {
       for (let k in eventdata['keys'])
@@ -507,7 +567,7 @@ AutomatoSystem = function(caller_context) {
       let context = scripting_js.script_context({ 'params': params });
       scripting_js.script_exec(passthrough_conf['init'], context);
     }
-    this._entry_event_publish_and_invoke_listeners(dest_entry, ("rename" in passthrough_conf) && passthrough_conf["rename"] ? passthrough_conf["rename"] : eventname, params, eventdata['time'], '#events_passthrough');
+    this._entry_event_publish_and_invoke_listeners(dest_entry, ("rename" in passthrough_conf) && passthrough_conf["rename"] ? passthrough_conf["rename"] : eventname, params, eventdata['time'], 'events_passthrough', published_message);
   }
 
   /*
@@ -631,7 +691,13 @@ AutomatoSystem = function(caller_context) {
    * If the reference has no "@", only the local part is matched (so, if there are more entries with the same local part, every one of these is matched)
    */
   this.entry_id_match = function(entry, reference) {
-    //OBSOLETE: return (entry.id == reference) || (reference.indexOf("@") < 0 && entry.is_local && entry.id_local == reference);
+    if (typeof entry == "string") {
+      if (entry == reference)
+        return true;
+      let d1 = entry.indexOf("@");
+      let d2 = reference.indexOf("@");
+      return (d1 < 0 && d2 >= 0 && entry == reference.slice(0, d2)) || (d1 >= 0 && d2 < 0 && entry.slice(0, d1) == reference);
+    }
     return (entry.id == reference) || (reference.indexOf("@") < 0 && entry.id_local == reference);
   }
 
@@ -971,8 +1037,14 @@ AutomatoSystem = function(caller_context) {
    * MANAGE MESSAGES PUBLISHED ON BROKER
    *
    ***************************************************************************************************************************************************************/
+  
+  this.message_counter = 0;
 
-  this.Message = function(system, topic, payload, qos = null, retain = null, payload_source = null, received = 0) {
+  this.Message = function(system, topic, payload, qos = null, retain = null, payload_source = null, received = 0, copy_id = -1) {
+    if (copy_id == -1)
+      this.id = system.message_counter ++;
+    else
+      this.id = copy_id;
     this.topic = topic;
     this.payload = payload;
     this.payload_source = payload_source;
@@ -1048,7 +1120,7 @@ AutomatoSystem = function(caller_context) {
     }
     
     this.copy = function() {
-      let m = new system.Message(system, this.topic, deepcopy(this.payload), this.qos, this.retain, this.payload_source, this.received);
+      let m = new system.Message(system, this.topic, deepcopy(this.payload), this.qos, this.retain, this.payload_source, this.received, this.id);
       m._publishedMessages = this._publishedMessages;
       m._firstPublishedMessage = this._firstPublishedMessage;
       m._subscribedMessages = this._subscribedMessages;
@@ -1302,11 +1374,15 @@ AutomatoSystem = function(caller_context) {
       for (let entry_ref in this.events_listeners[eventname])
         if (entry_ref == '*' || this.entry_id_match(entry, entry_ref))
           //console.debug("_entry_event_invoke_listeners_match" + str(this.events_listeners[eventname][entry_ref]))
-          for ([listener, condition] of this.events_listeners[eventname][entry_ref])
-            if (condition == null || this._entry_event_params_match_condition(eventdata, condition))
-              //console.debug("_entry_event_invoke_listeners_GO")
-              listener(entry, eventname, eventdata);
-            
+          for ([listener, condition, reference_entry_id] of this.events_listeners[eventname][entry_ref])
+            if (listener) {
+              let _s = this._stats_start();
+              if (condition == null || this._entry_event_params_match_condition(eventdata, condition))
+                //console.debug("_entry_event_invoke_listeners_GO")
+                listener(entry, eventname, eventdata, caller, published_message);
+              this._stats_end('event_listener(' + listener + '|' + condition + ')', _s);
+            }
+    
     if (this.handler_on_all_events)
       for (let h of this.handler_on_all_events.values())
         h(entry, eventname, eventdata, caller, published_message);
@@ -1319,10 +1395,10 @@ AutomatoSystem = function(caller_context) {
     return scripting_js.script_eval(condition, {'params': eventdata['params'], 'changed_params': eventdata['changed_params'], 'keys': eventdata['keys']}, /*to_dict = */false, /*cache = */true);
   }
 
-  this._entry_event_publish_and_invoke_listeners = function(entry, eventname, params, time, caller) {
-    // @param caller is "#events_passthrough" in case of events_passthrough
+  this._entry_event_publish_and_invoke_listeners = function(entry, eventname, params, time, caller, published_message) {
+    // @param caller is "events_passthrough" in case of events_passthrough
     let eventdata = this._entry_event_publish(entry, eventname, params, time);
-    this._entry_event_invoke_listeners(entry, eventdata, caller);
+    this._entry_event_invoke_listeners(entry, eventdata, caller, published_message);
   }
 
   this.entry_topic_lambda = function(entry) {
@@ -1606,10 +1682,12 @@ AutomatoSystem = function(caller_context) {
     /*
     Adds an event listener based on the event reference string "entry.event(condition)"
     @param eventref 
-    @param listener a callback, defined as listener(entry, eventname, eventdata)
-    @param reference_entry The entry with the event_reference. Used for implicit references (if eventref dont contains entry id).
+    @param listener a callback, defined as listener(entry, eventname, eventdata, caller, published_message) - caller = "message|import|events_passthrough", published_message = source message (null for import)
+    @param reference_entry The entry generating this reference. If an entry is doing this call, you MUST pass this parameter. It's used to clean the enviroment when the caller in unloaded. Also used for implicit reference (if eventref dont contains entry id).
     @param reference_tag Just for logging purpose, the context of the entry defining the the event_reference (so who reads the log could locate where the event_reference is defined)
     */
+    if (!reference_entry)
+      console.warn("SYSTEM> Called system.on_event without a reference entry: {eventref}".format({eventref: eventref}));
     let d = !isinstance(eventref, 'dict') ? this.decode_event_reference(eventref, /*default_entry_id = */reference_entry ? reference_entry.id : null) : eventref;
     if (!d)
       console.error("#{entry}> Invalid '{type}' definition{tag}: {defn}".format({entry: reference_entry ? reference_entry.id : '?', type: listener ? 'on event' : 'events_listen', tag: reference_tag ? (' in ' + reference_tag) : '', defn: eventref}));
@@ -1619,8 +1697,7 @@ AutomatoSystem = function(caller_context) {
       //OBSOLETE: d['entry'] = this.entry_id_find(d['entry']);
       if (!(d['entry'] in this.events_listeners[d['event']]))
         this.events_listeners[d['event']][d['entry']] = [];
-      if (listener)
-        this.events_listeners[d['event']][d['entry']].push([listener, d['condition']]);
+      this.events_listeners[d['event']][d['entry']].push([listener, d['condition'], reference_entry ? reference_entry.id : null]);
     }
   }
 
@@ -1632,17 +1709,40 @@ AutomatoSystem = function(caller_context) {
   }
 
   this.entry_on_event_lambda = function(entry) {
-    return function(event, listener, condition = null) { return this.entry_on_event(entry, event, listener, condition) };
+    return function(event, listener, condition = null, reference_entry = null, reference_tag = null) { return this.entry_on_event(entry, event, listener, condition, reference_entry, reference_tag) };
   }
 
-  this.entry_on_event = function(entry, event, listener, condition = null) {
+  this.entry_on_event = function(entry, event, listener, condition = null, reference_entry = null, reference_tag = null) {
     /*
     Adds an event listener on the specified entry.event(condition)
     @param event name of event matched
-    @param listener a callback, defined as listener(entry, eventname, eventdata)
+    @param listener a callback, defined as listener(entry, eventname, eventdata, caller, published_message)
     @param condition javascript condition to match event. Example: "port = 1 && value < 10"
+    @param reference_entry The entry generating this reference. If an entry is doing this call, you MUST pass this parameter. It's used to clean the enviroment when the caller in unloaded. Also used for implicit reference (if eventref dont contains entry id).
+    @param reference_tag Just for logging purpose, the context of the entry defining the the event_reference (so who reads the log could locate where the event_reference is defined)
     */
-    this.on_event({'entry': entry.id, 'event': event, 'condition': condition}, listener);
+    this.on_event({'entry': entry.id, 'event': event, 'condition': condition}, listener, reference_entry, reference_tag);
+  }
+  
+  /**
+   * Remove all event listener with target or reference equal to reference_entry_id
+   */
+  this.remove_event_listener_by_reference_entry = function(reference_entry_id) {
+    for (let eventname in this.events_listeners) {
+      for (let entry_ref in this.events_listeners[eventname]) {
+        if (this.entry_id_match(entry_ref, reference_entry_id))
+          delete this.events_listeners[eventname][entry_ref];
+        else {
+          for (let i = this.events_listeners[eventname][entry_ref].length - 1; i >= 0; i--)
+            if (this.events_listeners[eventname][entry_ref][i][2] == reference_entry_id)
+              this.events_listeners[eventname][entry_ref].splice(i, 1);
+          if (!this.events_listeners[eventname][entry_ref].length)
+            delete this.events_listeners[eventname][entry_ref];
+        }
+      }
+      if (!Object.keys(this.events_listeners[eventname]).length)
+        delete this.events_listeners[eventname];
+    }
   }
 
   this.entry_support_action = function(entry, actionname) {

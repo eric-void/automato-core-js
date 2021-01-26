@@ -2,6 +2,7 @@
  * UTILS
  */
 
+/*
 function dict_merge(dct, merge_dct) {
   for (k in merge_dct)
     if (k in dct && isinstance(dct[k], 'dict')  && isinstance(merge_dct[k], 'dict'))
@@ -9,6 +10,16 @@ function dict_merge(dct, merge_dct) {
     else
       dct[k] = merge_dct[k];
   return dct;
+}
+*/
+
+function dict_merge(dct, merge_dct) {
+  if (isinstance(dct, 'dict') && isinstance(merge_dct, 'dict')) {
+    for (let k in merge_dct)
+      dct[k] = dict_merge(k in dct ? dct[k] : null, merge_dct[k]);
+    return dct;
+  }
+  return merge_dct;
 }
 
 /**
@@ -107,12 +118,16 @@ function nan_remove(v) {
   return v
 }
 
-function json_sorted_encode(data) {
-  if (!isinstance(data, 'dict'))
+function json_sorted_encode(data, recursive = false) {
+  return JSON.stringify(sort_map(data, recursive));
+}
+
+function sort_map(data, recursive = false) {
+  if (!is_dict(data))
     return data;
   let sorted = {};
-  Object.keys(data).sort().forEach(function(k) { sorted[k] = data[k]; });
-  return JSON.stringify(sorted);
+  Object.keys(data).sort().forEach(function(k) { sorted[k] = recursive ? sort_map(data[k]) : data[k]; });
+  return sorted;
 }
 
 function b64_compress_data(data) {
@@ -176,11 +191,11 @@ function array_max(a) {
 }
 
 function is_array(v) {
-  return typeof v == "object" && Array.isArray(v);
+  return v !== null && typeof v == "object" && Array.isArray(v);
 }
 
 function is_dict(v) {
-  return typeof v == "object" && v.constructor == Object && !(v instanceof Array);
+  return v !== null && typeof v == "object" && v.constructor == Object && !(v instanceof Array);
 }
 
 /***************************************************************************************************************************************************************
@@ -417,13 +432,9 @@ function _(v) {
 }
 
 /**
- *
- *  MD5 (Message-Digest Algorithm)
- *  http://www.webtoolkit.info/
- *
+ *  @see MD5 (Message-Digest Algorithm) - http://www.webtoolkit.info/
  **/
-
-var MD5 = function (string) {
+function md5_hexdigest(string) {
  
   function RotateLeft(lValue, iShiftBits) {
     return (lValue<<iShiftBits) | (lValue>>>(32-iShiftBits));
@@ -622,4 +633,8 @@ var MD5 = function (string) {
   var temp = WordToHex(a)+WordToHex(b)+WordToHex(c)+WordToHex(d);
  
   return temp.toLowerCase();
+}
+
+function data_signature(data) {
+  return md5_hexdigest(json_sorted_encode(data, true));
 }

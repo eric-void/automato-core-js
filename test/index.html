@@ -125,8 +125,8 @@
         system.broker().publish("item/entry_a/event", "test");
       });
       
-      /*system.on_event('*.test_event', function(entry, eventname, eventdata) {
-        console.log("on_event", entry, eventname, eventdata);
+      /*system.on_event('*.test_event', function(entry, eventname, eventdata, caller, published_message) {
+        console.log("on_event", entry, eventname, eventdata, caller, published_message);
       });*/
       
       // system.event_get('otherbutton1@OTHERNODE.input')

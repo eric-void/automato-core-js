@@ -107,7 +107,7 @@ function AutomatoScriptingJs(system, caller_context) {
           }
         key = "CONTEXT:" + json_export(key) + ",CODE:" + code;
         
-        let keyhash = MD5(key);
+        let keyhash = md5_hexdigest(key);
         if (keyhash in this.script_eval_cache && this.script_eval_cache[keyhash]['key'] == key) {
           this.script_eval_cache[keyhash]['used'] = system.time();
           this.script_eval_cache_hits += 1;
