@@ -13,12 +13,18 @@ function dict_merge(dct, merge_dct) {
 }
 */
 
-function dict_merge(dct, merge_dct) {
+/**
+ * @param join_lists_depth (int): if != 0 two lists are joined together, and in recursive call this parameter is decremented by 1. If 0 merge_dct list will override dct one.
+ *        Use 0 to disable list joining, -1 to enable list joining for all levels, 2 to join only lists in first level (note that "1" is dct/merge_dct itself)
+ */
+function dict_merge(dct, merge_dct, join_lists_depth = 0) {
   if (isinstance(dct, 'dict') && isinstance(merge_dct, 'dict')) {
     for (let k in merge_dct)
-      dct[k] = dict_merge(k in dct ? dct[k] : null, merge_dct[k]);
+      dct[k] = dict_merge(k in dct ? dct[k] : null, merge_dct[k], join_lists_depth ? join_lists_depth - 1 : 0);
     return dct;
   }
+  if (isinstance(dct, 'list') && isinstance(merge_dct, 'list'))
+    return dct.concat(merge_dct);
   return merge_dct;
 }
 

@@ -105,6 +105,16 @@ AutomatoSystem = function(caller_context) {
     this.handler_on_all_events = [];
   }
 
+  /*
+  @param handler: This callback can be called several time for a single batch of entries loading. If a call invalid previously loaded (and initialized entries), they will be passed in a new callback.
+    You can classify entry loading phases with these references:
+    - loading_defs {entry_id: entry}: loading entries for this specific callback call, that must be processed
+    - system.entries(): ALL entries managed by the system, this contains already loaded and initialized, already loaded (by the current loading request) but NOT inizialized (passed in previous callback calls and processed), loading now (NOT initialized and, obviously, NOT processed by this call)
+    - for (entry in system.entries().values()) if entry.loaded: entries already loaded and initialized. Only these entries can be returned in this callback (to flag them as "must_reload")
+    - for (entry in system.entries().values()) if entry not in loading_defs: entries already loaded and initialized + entries already loaded (by the current loading request) but NOT inizialized. These have been passed in previous callback calls and processed by it.
+    - for (entry in system.entries().values()) if not entry.loaded and entry not in loading_defs: only entries already loaded (by the current loading request) but NOT inizialized. These have been passed in previous callback calls and processed by it.
+    handler can return a list of ids of entries (already loaded and initialized) that must be unloaded and reloaded
+  */
   this.on_entry_load = function(handler) {
     this.handler_on_entry_load.push(handler);
   }
@@ -150,7 +160,9 @@ AutomatoSystem = function(caller_context) {
     
     notifications.init();
     
-    this.entry_load_definitions(this.config['entries'], /*initial = */this.default_node_name, true, false, /*id_from_definition = */true, /*generate_new_entry_id_on_conflict = */ true);
+    //this.entry_load_definitions(this.config['entries'], /*initial = */this.default_node_name, true, false, /*id_from_definition = */true, /*generate_new_entry_id_on_conflict = */ true);
+    if (this.config['entries'])
+      this.entry_load(this.config['entries'], /* node_name = */ this.default_node_name, /*id_from_definition = */true, /*generate_new_entry_id_on_conflict = */ true);
 
     if (this.handler_on_initialized)
       for (let h of this.handler_on_initialized.values())
@@ -160,7 +172,6 @@ AutomatoSystem = function(caller_context) {
       this._mqtt_connect_callback(callback, phase);
     }.bind(this));
   }
-  
 
   this.destroy = function() {
     for (entry_id in this.all_entries)
@@ -316,12 +327,170 @@ AutomatoSystem = function(caller_context) {
     this._refresh_definition_based_properties = function() {
       this.config = 'config' in this.definition ? this.definition['config'] : {};
       this.caption = 'caption' in this.definition ? this.definition['caption'] : this.id_local;
+      if (!('publish' in this.definition))
+        this.definition['publish'] = {};
+      if (!('subscribe' in this.definition))
+        this.definition['subscribe'] = {};
+      if (!('on' in this.definition))
+        this.definition['on'] = {};
+      if (!('events_listen' in this.definition))
+        this.definition['events_listen'] = [];
     }
     
     this._refresh_definition_based_properties();
   }
 
-  this.entry_load = function(definition, from_node_name = false, entry_id = false, generate_new_entry_id_on_conflict = false, call_on_entries_change = true) {
+  /*this.entry_load = function(definition, from_node_name = false, entry_id = false, generate_new_entry_id_on_conflict = false, call_on_entries_change = true) {
+    if (!isinstance(definition, 'dict'))
+      return null;
+
+    if (!from_node_name) {
+      let d = entry_id ? entry_id.indexOf("@") : -1;
+      from_node_name = d >= 0 ? entry_id.slice(d + 1) : this.default_node_name;
+    }
+    
+    if (!entry_id)
+      entry_id = 'id' in definition ? definition['id'] : ('item' in definition ? definition['item'] : ('module' in definition ? definition['module'] : ('device' in definition ? definition['device'] : (''))));
+    if (!entry_id)
+      return null;
+    entry_id = entry_id.replace(/[^A-Za-z0-9@_-]+/g, '-');
+    let d = entry_id.indexOf("@");
+    if (d < 0)
+      entry_id = entry_id + '@' + from_node_name;
+    
+    if (generate_new_entry_id_on_conflict && entry_id in this.all_entries) {
+      d = entry_id.indexOf("@");
+      entry_local_id = entry_id.slice(0, d);
+      entry_node_name = entry_id.slice(d + 1);
+      entry_id = entry_local_id;
+      let i = 0;
+      while (entry_id + '@' + entry_node_name in this.all_entries)
+        entry_id = entry_local_id + '_' + (++ i);
+      entry_id = entry_id + '@' + entry_node_name;
+    }
+
+    let new_signature = data_signature(definition);
+    if (entry_id in this.all_entries) {
+      if (new_signature && this.all_entries_signatures[entry_id] == new_signature)
+        return null;
+      this.entry_unload(entry_id);
+    }
+    
+    console.debug("SYSTEM> Loading entry {id} ...".format({id: entry_id}));
+    let entry = new this.Entry(this, entry_id, definition, this.config);
+    entry.is_local = entry.node_name == this.default_node_name;
+    
+    if (this.handler_on_entry_load)
+      for (let h of this.handler_on_entry_load.values())
+        h(entry);
+      
+    entry._refresh_definition_based_properties();
+    
+    this._entry_definition_normalize_after_load(entry);
+    this._entry_events_load(entry);
+    this._entry_actions_load(entry);
+    this._entry_events_install(entry);
+    this._entry_actions_install(entry);
+    this._entry_add_to_index(entry);
+    
+    this.all_entries[entry_id] = entry;
+    this.all_entries_signatures[entry_id] = new_signature;
+    if (!(entry.node_name in this.all_nodes))
+      this.all_nodes[entry.node_name] = {};
+
+    if (this.handler_on_entry_init)
+      for (let h of this.handler_on_entry_init.values())
+        h(entry);
+      
+    console.debug("SYSTEM> Loaded entry {id}.".format({id: entry_id}));
+
+    if (call_on_entries_change && this.handler_on_entries_change)
+      for (let h in this.handler_on_entries_change)
+        h([entry.id], []);
+    
+    return entry;
+  }*/
+  
+  /*
+  Load a batch of definitions to instantiate entries.
+  There are 2 phases for this process:
+  - in first one (_entry_load_definition) we load and process each entry definition. During this phase on_entry_load callback is called and can invalidate previously loaded (and initialized) entries, that must be unloaded and reloaded and injected in this phase.
+    in this phase a call to system.entries() will returns ALL entries, event the one loading right now (we can detect the state with entry.loaded flag)
+    load, entry_load, entry_install handlers are called in this phase
+  - in a second phase (_entry_load_init) all defined entries will be initialized
+    init handler is called in this phase
+  
+  @param id_from_definition. If True: definitions = [ { ...definition...} ]; if False: definitions = { 'entry_id': { ... definition ... } }
+  */
+  this.entry_load = function(definitions, node_name = false, unload_other_from_node = false, id_from_definition = false, generate_new_entry_id_on_conflict = false) {
+    if (!node_name)
+      node_name = this.default_node_name;
+    
+    let loaded_defs = {};
+    let loading_defs = {};
+    let reload_definitions = {};
+    let unloaded = [];
+    while (len(definitions)) {
+      for (let definition in definitions) {
+        let entry_id = false;
+        if (!id_from_definition)
+          entry_id = definition;
+        definition = definitions[definition];
+        if (!('disabled' in definition) || !definition['disabled']) {
+          let entry = this._entry_load_definition(definition, node_name, entry_id, generate_new_entry_id_on_conflict);
+          if (entry)
+            loading_defs[entry.id] = entry;
+        }
+      }
+      console.debug("SYSTEM> Loading entries, loaded definitions for {entries} ...".format({entries: Object.keys(loading_defs) }));
+      if (this.handler_on_entry_load)
+        for (let h of this.handler_on_entry_load.values()) {
+          let reload_entries = h(loading_defs);
+          if (reload_entries) {
+            console.debug("SYSTEM> Loading entries, need to reload other entries {entries} ...".format({entries: reload_entries}));
+            for (let rentry_id in reload_entries)
+              if (!(rentry_id in reload_definitions) && rentry_id in this.all_entries) {
+                reload_definitions[rentry_id] = this.all_entries[rentry_id].definition_loaded;
+                this.entry_unload(rentry_id, False);
+                unloaded.push(rentry_id);
+              }
+          }
+        }
+      if (len(reload_definitions)) {
+        id_from_definition = false;
+        definitions = reload_definitions;
+        reload_definitions = {};
+      } else
+        definitions = false;
+      for (let entry_id in loading_defs)
+        loaded_defs[entry_id] = loading_defs[entry_id];
+      loading_defs = {};
+    }
+  
+    if (unload_other_from_node) {
+      let todo_unload = [];
+      for (let entry_id in this.all_entries)
+        if (this.all_entries[entry_id].node_name == node_name && !(entry_id in loaded_defs))
+          todo_unload.push(entry_id);
+      for (let entry_id of todo_unload) {
+        this.entry_unload(entry_id);
+        unloaded.push(entry_id);
+      }
+    }
+    
+    if (loaded_defs) {
+      console.debug("SYSTEM> Loading entries, initializing {entries} ...".format({entries: Object.keys(loaded_defs)}));
+      for (let entry_id in loaded_defs)
+        this._entry_load_init(loaded_defs[entry_id]);
+      console.debug("SYSTEM> Loaded entries {entries}.".format({entries: Object.keys(loaded_defs)}));
+    }
+    
+    if (this.handler_on_entries_change)
+      for (let h in this.handler_on_entries_change)
+        h(Object.keys(loaded_defs), unloaded);
+  }
+  
+  this._entry_load_definition = function(definition, from_node_name = false, entry_id = false, generate_new_entry_id_on_conflict = false) {
     if (!isinstance(definition, 'dict'))
       return null;
 
@@ -360,69 +529,73 @@ AutomatoSystem = function(caller_context) {
     let entry = new this.Entry(this, entry_id, definition, this.config);
     entry.is_local = entry.node_name == this.default_node_name;
     
-    if (this.handler_on_entry_load)
-      for (let h of this.handler_on_entry_load.values())
-        h(entry);
-      
-    entry._refresh_definition_based_properties();
-    
-    this._entry_definition_normalize_after_load(entry);
     this._entry_events_load(entry);
     this._entry_actions_load(entry);
-    this._entry_events_install(entry);
-    this._entry_actions_install(entry);
-    this._entry_add_to_index(entry);
+    entry._refresh_definition_based_properties();
     
+    entry.loaded = false;
     this.all_entries[entry_id] = entry;
     this.all_entries_signatures[entry_id] = new_signature;
     if (!(entry.node_name in this.all_nodes))
       this.all_nodes[entry.node_name] = {};
+    
+    return entry;
+  }
+
+  this._entry_load_init = function(entry) {
+    this._entry_definition_normalize_after_load(entry);
+    this._entry_events_install(entry);
+    this._entry_actions_install(entry);
+    this._entry_add_to_index(entry);
 
     if (this.handler_on_entry_init)
       for (let h of this.handler_on_entry_init.values())
         h(entry);
-      
-  if (call_on_entries_change && this.handler_on_entries_change)
-    for (let h in this.handler_on_entries_change)
-      h([entry.id], []);
-
-    return entry;
+    
+    entry.loaded = true;
   }
     
-  this.entry_unload = function(entry_id, call_on_entries_change = true) {
-    if (entry_id in this.all_entries) {
-      if (this.handler_on_entry_unload)
-        for (let h of this.handler_on_entry_unload.values())
-          h(this.all_entries[entry_id]);
+  this.entry_unload = function(entry_ids, call_on_entries_change = true) {
+    if (typeof entry_ids == "string")
+      entry_ids = [ entry_ids ];
+    for (entry_id in entry_ids)
+      if (entry_id in this.all_entries) {
+        console.debug("SYSTEM> Unloading entry {id} ...".format({id: entry_id}));
+        if (this.handler_on_entry_unload)
+          for (let h of this.handler_on_entry_unload.values())
+            h(this.all_entries[entry_id]);
+          
+        this.remove_event_listener_by_reference_entry(entry_id);
+        this._entry_remove_from_index(this.all_entries[entry_id]);
         
-      this.remove_event_listener_by_reference_entry(entry_id);
-      this._entry_remove_from_index(this.all_entries[entry_id]);
-      
-      delete this.all_entries[entry_id];
-      delete this.all_entries_signatures[entry_id];
-      
-      if (call_on_entries_change && this.handler_on_entries_change)
-        for (let h in this.handler_on_entries_change)
-          h([], [entry_id]);
-    }
+        delete this.all_entries[entry_id];
+        delete this.all_entries_signatures[entry_id];
+        
+        console.debug("SYSTEM> Unloaded entry {id}.".format({id: entry_id}));
+      }
+
+    if (call_on_entries_change && this.handler_on_entries_change)
+      for (let h in this.handler_on_entries_change)
+        h([], entry_ids);
   }
   
   this.entry_reload = function(entry_id, call_on_entries_change = true) {
-    if (entry_id in this.all_entries) {
-      let definition = this.all_entries[entry_id].definition_loaded;
-      this.entry_unload(entry_id, false);
-      this.entry_load(definition, false, entry_id, false, false);
-      
-      if (call_on_entries_change && this.handler_on_entries_change)
-        for (let h in this.handler_on_entries_change)
-          h([entry_id], [entry_id]);
-    }
+    if (typeof entry_ids == "string")
+      entry_ids = [ entry_ids ];
+    for (entry_id in entry_ids)
+      if (entry_id in this.all_entries) {
+        let definition = this.all_entries[entry_id].definition_loaded;
+        this.entry_unload(entry_id, false);
+        this.entry_load(definition, false, entry_id, false, false);
+      }
+
+    if (call_on_entries_change && this.handler_on_entries_change)
+      for (let h in this.handler_on_entries_change)
+        h(entry_ids, entry_ids);
   }
   
+  /*
   this.entry_load_definitions = function(definitions, node_name = false, initial = false, unload_other_from_node = false, id_from_definition = false, generate_new_entry_id_on_conflict = false) {
-    /*
-    @param id_from_definition. If true: definitions = [ { ...definition...} ]; if false: definitions = { 'entry_id': { { ... definition ... } }
-    */
     if (!node_name)
       node_name = this.default_node_name;
     
@@ -452,6 +625,7 @@ AutomatoSystem = function(caller_context) {
       for (let h in this.handler_on_entries_change)
         h(Object.keys(loaded), todo_unload);
   }
+  */
 
   this.entry_unload_node_entries = function(node_name) {
     let todo_unload = [];
@@ -466,6 +640,9 @@ AutomatoSystem = function(caller_context) {
         h([], todo_unload);
   }
 
+  /**
+   * Returns ALL entries loaded, or in loading phase, by the system. To get only fully loaded (and initialized) entries look at entry.loaded flag
+   */
   this.entries = function() {
     return this.all_entries;
   }
@@ -485,15 +662,6 @@ AutomatoSystem = function(caller_context) {
    ***************************************************************************************************************************************************************/
 
   this._entry_definition_normalize_after_load = function(entry) {
-    if (!('publish' in entry.definition))
-      entry.definition['publish'] = {};
-    if (!('subscribe' in entry.definition))
-      entry.definition['subscribe'] = {};
-    if (!('on' in entry.definition))
-      entry.definition['on'] = {};
-    if (!('events_listen' in entry.definition))
-      entry.definition['events_listen'] = {};
-    
     if (entry.is_local) {
       if (!('entry_topic' in entry.definition))
         entry.definition['entry_topic'] = entry.type + '/' + entry.id_local;
@@ -682,8 +850,9 @@ AutomatoSystem = function(caller_context) {
     /*
     Use this method in "system_loaded" hook to add definitions to an entry, to be intended as base definitions (node config and module definitions and "load" hook will override them)
     Don't use this method AFTER "system_loaded" hook: during "entry_init" phase definitions are processed and normalized, and changing them could result in runtime errors.
+    NOTE: List settings in first-level (for example: required, events_listen, ...) are joined together. List settings in other levels are NOT joined (like all other primitive types).
     */
-    entry.definition = dict_merge(_default, entry.definition);
+    entry.definition = dict_merge(_default, entry.definition, 2); // 2 = lists in first level are joined
   }
 
   /**
