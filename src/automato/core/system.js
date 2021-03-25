@@ -160,9 +160,7 @@ AutomatoSystem = function(caller_context) {
     
     notifications.init();
     
-    //this.entry_load_definitions(this.config['entries'], /*initial = */this.default_node_name, true, false, /*id_from_definition = */true, /*generate_new_entry_id_on_conflict = */ true);
-    if (this.config['entries'])
-      this.entry_load(this.config['entries'], /* node_name = */ this.default_node_name, /*id_from_definition = */true, /*generate_new_entry_id_on_conflict = */ true);
+    this.entry_load(this.config['entries'], /* node_name = */ this.default_node_name, /*id_from_definition = */true, /*generate_new_entry_id_on_conflict = */ true);
 
     if (this.handler_on_initialized)
       for (let h of this.handler_on_initialized.values())
@@ -174,8 +172,8 @@ AutomatoSystem = function(caller_context) {
   }
 
   this.destroy = function() {
-    for (entry_id in this.all_entries)
-      this.entry_unload(entry_id);
+    while (len(this.all_entries))
+      this.entry_unload(Object.keys(this.all_entries));
       
     this.destroyed = true;
     notifications.destroy();
@@ -339,77 +337,6 @@ AutomatoSystem = function(caller_context) {
     
     this._refresh_definition_based_properties();
   }
-
-  /*this.entry_load = function(definition, from_node_name = false, entry_id = false, generate_new_entry_id_on_conflict = false, call_on_entries_change = true) {
-    if (!isinstance(definition, 'dict'))
-      return null;
-
-    if (!from_node_name) {
-      let d = entry_id ? entry_id.indexOf("@") : -1;
-      from_node_name = d >= 0 ? entry_id.slice(d + 1) : this.default_node_name;
-    }
-    
-    if (!entry_id)
-      entry_id = 'id' in definition ? definition['id'] : ('item' in definition ? definition['item'] : ('module' in definition ? definition['module'] : ('device' in definition ? definition['device'] : (''))));
-    if (!entry_id)
-      return null;
-    entry_id = entry_id.replace(/[^A-Za-z0-9@_-]+/g, '-');
-    let d = entry_id.indexOf("@");
-    if (d < 0)
-      entry_id = entry_id + '@' + from_node_name;
-    
-    if (generate_new_entry_id_on_conflict && entry_id in this.all_entries) {
-      d = entry_id.indexOf("@");
-      entry_local_id = entry_id.slice(0, d);
-      entry_node_name = entry_id.slice(d + 1);
-      entry_id = entry_local_id;
-      let i = 0;
-      while (entry_id + '@' + entry_node_name in this.all_entries)
-        entry_id = entry_local_id + '_' + (++ i);
-      entry_id = entry_id + '@' + entry_node_name;
-    }
-
-    let new_signature = data_signature(definition);
-    if (entry_id in this.all_entries) {
-      if (new_signature && this.all_entries_signatures[entry_id] == new_signature)
-        return null;
-      this.entry_unload(entry_id);
-    }
-    
-    console.debug("SYSTEM> Loading entry {id} ...".format({id: entry_id}));
-    let entry = new this.Entry(this, entry_id, definition, this.config);
-    entry.is_local = entry.node_name == this.default_node_name;
-    
-    if (this.handler_on_entry_load)
-      for (let h of this.handler_on_entry_load.values())
-        h(entry);
-      
-    entry._refresh_definition_based_properties();
-    
-    this._entry_definition_normalize_after_load(entry);
-    this._entry_events_load(entry);
-    this._entry_actions_load(entry);
-    this._entry_events_install(entry);
-    this._entry_actions_install(entry);
-    this._entry_add_to_index(entry);
-    
-    this.all_entries[entry_id] = entry;
-    this.all_entries_signatures[entry_id] = new_signature;
-    if (!(entry.node_name in this.all_nodes))
-      this.all_nodes[entry.node_name] = {};
-
-    if (this.handler_on_entry_init)
-      for (let h of this.handler_on_entry_init.values())
-        h(entry);
-      
-    console.debug("SYSTEM> Loaded entry {id}.".format({id: entry_id}));
-
-    if (call_on_entries_change && this.handler_on_entries_change)
-      for (let h in this.handler_on_entries_change)
-        h([entry.id], []);
-    
-    return entry;
-  }*/
   
   /*
   Load a batch of definitions to instantiate entries.
@@ -574,6 +501,9 @@ AutomatoSystem = function(caller_context) {
         console.debug("SYSTEM> Unloaded entry {id}.".format({id: entry_id}));
       }
 
+    // TODO I need to reset topic_cache. I can improve this by resetting only topic matching entry unloading ones
+    this.topic_cache_reset();
+
     if (call_on_entries_change && this.handler_on_entries_change)
       for (let h in this.handler_on_entries_change)
         h([], entry_ids);
@@ -594,39 +524,6 @@ AutomatoSystem = function(caller_context) {
         h(entry_ids, entry_ids);
   }
   
-  /*
-  this.entry_load_definitions = function(definitions, node_name = false, initial = false, unload_other_from_node = false, id_from_definition = false, generate_new_entry_id_on_conflict = false) {
-    if (!node_name)
-      node_name = this.default_node_name;
-    
-    let loaded = {};
-    for (let definition in definitions) {
-      let entry_id = false;
-      if (!id_from_definition)
-        entry_id = definition;
-      definition = definitions[definition];
-      if (!('disabled' in definition) || !definition['disabled']) {
-        let entry = this.entry_load(definition, node_name, entry_id, generate_new_entry_id_on_conflict);
-        if (entry)
-          loaded[entry.id] = entry;
-      }
-    }
-
-    let todo_unload = [];
-    if (unload_other_from_node) {
-      for (let entry_id in this.all_entries)
-        if (this.all_entries[entry_id].node_name == node_name && !(entry_id in loaded))
-          todo_unload.push(entry_id);
-      for (let entry_id of todo_unload)
-        this.entry_unload(entry_id);
-    }
-    
-    if (this.handler_on_entries_change)
-      for (let h in this.handler_on_entries_change)
-        h(Object.keys(loaded), todo_unload);
-  }
-  */
-
   this.entry_unload_node_entries = function(node_name) {
     let todo_unload = [];
     for (let entry_id in this.all_entries)
