@@ -977,7 +977,7 @@ AutomatoSystem = function(caller_context) {
 
   this.topic_subscription_definition = function(topic, payload = null, strict_match = false) {
     /*
-    Return subscription definition, if present, of a published topic
+    Return subscription definition, if present, of a subscribed topic
     If multiple subscriptions are found, first not internal is returned, if present (use "entries_subscribed_to" if you want them all)
     */
     if (strict_match)
@@ -998,6 +998,8 @@ AutomatoSystem = function(caller_context) {
   this.entries_publishers_of = function(topic, payload = null, strict_match = false) {
     /*
     Search for all entries that can publish the topic passed, and return all topic metadatas (and matches, if subscribed with a regex pattern)
+    WARN: if a topic_rule has a topic_match_priority = 0 (usually because its defined as a "catchall" topic rule, like ['base/#': {}]), and the same topic matches a subscribed topic of the same entry, that entry will NOT be listed (the topic will be considered only as a subscribed one, and not a published one)
+    
     return {
       'ENTRY_ID': {
         'ENTRY_TOPIC': {
@@ -1032,15 +1034,18 @@ AutomatoSystem = function(caller_context) {
         for (let entry_id of t[1]['entries']) {
           let entry = this.entry_get(entry_id);
           if (entry) {
-            if (entry_id in res && this.topic_match_priority(entry.definition['publish'][t[0]]) > this.topic_match_priority(res[entry_id]['definition']))
-              delete res[entry_id];
-            if (!(entry_id in res))
-              res[entry_id] = {
-                'entry': entry,
-                'definition': entry.definition['publish'][t[0]],
-                'topic': t[0],
-                'matches': t[2],
-              };
+            let tmp = this.topic_match_priority(entry.definition['publish'][t[0]]);
+            if (tmp > 0 || !this.entry_is_subscribed_to(entry, topic, payload)) {
+              if (entry_id in res && tmp > this.topic_match_priority(res[entry_id]['definition']))
+                delete res[entry_id];
+              if (!(entry_id in res))
+                res[entry_id] = {
+                  'entry': entry,
+                  'definition': entry.definition['publish'][t[0]],
+                  'topic': t[0],
+                  'matches': t[2],
+                };
+            }
           } else
             console.error("SYSTEM> Internal error, entry references in index_topic_published not found: {entry_id}".format({entry_id: entry_id}));
         }
@@ -1094,6 +1099,47 @@ AutomatoSystem = function(caller_context) {
     return res;
   }
 
+  this.entry_topic_published_definition = function(entry, topic, payload = null, strict_match = false, skip_topic_match_priority = false) {
+    if (topic in entry.definition['publish'])
+      return entry.definition['publish'];
+    let res = null;
+    if (!strict_match)
+      for (let topic_rule in entry.definition['publish']) {
+        let m = this.topic_matches(topic_rule, topic);
+        if (m['matched']) {
+          if (skip_topic_match_priority)
+            return entry.definition['publish'][topic_rule];
+          if (!res || this.topic_match_priority(entry.definition['publish'][topic_rule]) > this.topic_match_priority(res))
+            res = entry.definition['publish'][topic_rule];
+        }
+      }
+    return res
+  }
+
+  this.entry_is_publisher_of = function(entry, topic, payload = null) {
+    return this.entry_topic_published_definition(entry, topic, false, true) ? true : false;
+  }
+
+  this.entry_topic_subscription_definition = function(entry, topic, payload = null, strict_match = false, skip_topic_match_priority = false) {
+    if (topic in entry.definition['subscribe'])
+      return entry.definition['subscribe'];
+    let res = null;
+    if (!strict_match)
+      for (let topic_rule in entry.definition['subscribe']) {
+        let m = this.topic_matches(topic_rule, topic);
+        if (m['matched']) {
+          if (skip_topic_match_priority)
+            return entry.definition['subscribe'][topic_rule];
+          if (!res || this.topic_match_priority(entry.definition['subscribe'][topic_rule]) > this.topic_match_priority(res))
+            res = entry.definition['subscribe'][topic_rule];
+        }
+      }
+    return res;
+  }
+
+  this.entry_is_subscribed_to = function(entry, topic, payload = null) {
+    return this.entry_topic_subscription_definition(entry, topic, false, true) ? true : false;
+  }
 
 
 
