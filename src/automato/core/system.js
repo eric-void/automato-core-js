@@ -97,34 +97,57 @@ AutomatoSystem = function(caller_context) {
     scripting_js.exports = this.exports;
 
     this.handler_on_entry_load = [];
+    this.handler_on_entry_load_batch = [];
     this.handler_on_entry_unload = [];
     this.handler_on_entry_init = [];
+    this.handler_on_entry_init_batch = [];
     this.handler_on_entries_change = [];
     this.handler_on_initialized = [];
     this.handler_on_message = [];
     this.handler_on_all_events = [];
   }
 
-  /*
-  @param handler: This callback can be called several time for a single batch of entries loading. If a call invalid previously loaded (and initialized entries), they will be passed in a new callback.
-    You can classify entry loading phases with these references:
-    - loading_defs {entry_id: entry}: loading entries for this specific callback call, that must be processed
-    - system.entries(): ALL entries managed by the system, this contains already loaded and initialized, already loaded (by the current loading request) but NOT inizialized (passed in previous callback calls and processed), loading now (NOT initialized and, obviously, NOT processed by this call)
-    - for (entry in system.entries().values()) if entry.loaded: entries already loaded and initialized. Only these entries can be returned in this callback (to flag them as "must_reload")
-    - for (entry in system.entries().values()) if entry not in loading_defs: entries already loaded and initialized + entries already loaded (by the current loading request) but NOT inizialized. These have been passed in previous callback calls and processed by it.
-    - for (entry in system.entries().values()) if not entry.loaded and entry not in loading_defs: only entries already loaded (by the current loading request) but NOT inizialized. These have been passed in previous callback calls and processed by it.
-    handler can return a list of ids of entries (already loaded and initialized) that must be unloaded and reloaded
-  */
+  /**
+   * Called during entry load phase, before on_entry_load_batch/on_entry_init/on_entry_init_batch, for every entry in loading phase
+   * @param handler(entry)
+   */
   this.on_entry_load = function(handler) {
     this.handler_on_entry_load.push(handler);
+  }
+
+  /**
+   * Called after on_entry_load, and before on_entry_init/on_entry_init_batch, with current batch of loading entries. 
+   * @param handler(loading_defs: {entry_id: entry}): This callback can be called several time for a single batch of entries loading. If a call invalid previously loaded (and initialized entries), they will be passed in a new callback.
+   *  You can classify entry loading phases with these references:
+   *  - loading_defs {entry_id: entry}: loading entries for this specific callback call, that must be processed
+   *  - system.entries(): ALL entries managed by the system, this contains already loaded and initialized, already loaded (by the current loading request) but NOT inizialized (passed in previous callback calls and processed), loading now (NOT initialized and, obviously, NOT processed by this call)
+   *  - for (entry in system.entries().values()) if entry.loaded: entries already loaded and initialized. Only these entries can be returned in this callback (to flag them as "must_reload")
+   *  - for (entry in system.entries().values()) if entry not in loading_defs: entries already loaded and initialized + entries already loaded (by the current loading request) but NOT inizialized. These have been passed in previous callback calls and processed by it.
+   *  - for (entry in system.entries().values()) if not entry.loaded and entry not in loading_defs: only entries already loaded (by the current loading request) but NOT inizialized. These have been passed in previous callback calls and processed by it.
+   *  handler can return a list of ids of entries (already loaded and initialized) that must be unloaded and reloaded
+   */
+  this.on_entry_load_batch = function(handler) {
+    this.on_entry_load_batch.push(handler);
   }
 
   this.on_entry_unload = function(handler) {
     this.handler_on_entry_unload.push(handler);
   }
 
+  /**
+   * Called after on_entry_load/on_entry_load, and before on_entry_init_batch, for every entry loaded and initialized by the core system
+   * @param handler(entry)
+   */
   this.on_entry_init = function(handler) {
     this.handler_on_entry_init.push(handler);
+  }
+
+  /**
+   * Called after on_entry_init, with current batch of initialized entries
+   * @param handler(entries: {entry_id: entry})
+   */
+  this.on_entry_init_batch = function(handler) {
+    this.on_entry_init_batch.push(handler);
   }
 
   /**
@@ -365,13 +388,17 @@ AutomatoSystem = function(caller_context) {
         definition = definitions[definition];
         if (!('disabled' in definition) || !definition['disabled']) {
           let entry = this._entry_load_definition(definition, node_name, entry_id, generate_new_entry_id_on_conflict);
-          if (entry)
+          if (entry) {
+            if (this.handler_on_entry_load)
+              for (let h of this.handler_on_entry_load.values())
+                h(entry);
             loading_defs[entry.id] = entry;
+          }
         }
       }
       console.debug("SYSTEM> Loading entries, loaded definitions for {entries} ...".format({entries: Object.keys(loading_defs) }));
-      if (this.handler_on_entry_load)
-        for (let h of this.handler_on_entry_load.values()) {
+      if (this.handler_on_entry_load_batch)
+        for (let h of this.handler_on_entry_load_batch.values()) {
           let reload_entries = h(loading_defs);
           if (reload_entries) {
             console.debug("SYSTEM> Loading entries, need to reload other entries {entries} ...".format({entries: reload_entries}));
@@ -407,8 +434,15 @@ AutomatoSystem = function(caller_context) {
     
     if (loaded_defs) {
       console.debug("SYSTEM> Loading entries, initializing {entries} ...".format({entries: Object.keys(loaded_defs)}));
-      for (let entry_id in loaded_defs)
+      for (let entry_id in loaded_defs) {
         this._entry_load_init(loaded_defs[entry_id]);
+        if (this.handler_on_entry_init)
+          for (let h of this.handler_on_entry_init.values())
+            h(loaded_defs[entry_id]);
+      }
+      if (this.handler_on_entry_init_batch)
+        for (let h of this.handler_on_entry_init_batch.values())
+          h(loaded_defs);
       console.debug("SYSTEM> Loaded entries {entries}.".format({entries: Object.keys(loaded_defs)}));
     }
     
@@ -475,10 +509,6 @@ AutomatoSystem = function(caller_context) {
     this._entry_actions_install(entry);
     this._entry_add_to_index(entry);
 
-    if (this.handler_on_entry_init)
-      for (let h of this.handler_on_entry_init.values())
-        h(entry);
-    
     entry.loaded = true;
   }
     
