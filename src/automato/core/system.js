@@ -327,16 +327,17 @@ AutomatoSystem = function(caller_context) {
       return null;
     }
     
+    this.definition = deepcopy(definition, 5); // WARN! Do not modify definition in code below, only this.definition
+    this.definition_loaded = deepcopy(definition, 5);
+    
     this.id = entry_id;
     this.id_local = entry_id.slice(0, d);
     this.node_name = entry_id.slice(d + 1);
     this.is_local = null;
     this.node_config = config;
-    if (!('type' in definition))
-      definition['type'] = 'device' in definition ? 'device' : ('module' in definition ? 'module' : 'item');
-    this.type = definition['type'];
-    this.definition = definition;
-    this.definition_loaded = deepcopy(definition, 5);
+    if (!('type' in this.definition))
+      this.definition['type'] = 'device' in this.definition ? 'device' : ('module' in this.definition ? 'module' : 'item');
+    this.type = this.definition['type'];
     this.created = system.time();
     this.last_seen = 0;
     this.exports = system.exports;
@@ -396,20 +397,22 @@ AutomatoSystem = function(caller_context) {
           }
         }
       }
-      console.debug("SYSTEM> Loading entries, loaded definitions for {entries} ...".format({entries: Object.keys(loading_defs) }));
-      if (this.handler_on_entry_load_batch)
-        for (let h of this.handler_on_entry_load_batch.values()) {
-          let reload_entries = h(loading_defs);
-          if (reload_entries) {
-            console.debug("SYSTEM> Loading entries, need to reload other entries {entries} ...".format({entries: reload_entries}));
-            for (let rentry_id in reload_entries)
-              if (!(rentry_id in reload_definitions) && rentry_id in this.all_entries) {
-                reload_definitions[rentry_id] = this.all_entries[rentry_id].definition_loaded;
-                this.entry_unload(rentry_id, False);
-                unloaded.push(rentry_id);
-              }
+      if (len(loading_defs)) {
+        console.debug("SYSTEM> Loading entries, loaded definitions for {entries} ...".format({entries: Object.keys(loading_defs) }));
+        if (this.handler_on_entry_load_batch)
+          for (let h of this.handler_on_entry_load_batch.values()) {
+            let reload_entries = h(loading_defs);
+            if (reload_entries) {
+              console.debug("SYSTEM> Loading entries, need to reload other entries {entries} ...".format({entries: reload_entries}));
+              for (let rentry_id in reload_entries)
+                if (!(rentry_id in reload_definitions) && rentry_id in this.all_entries) {
+                  reload_definitions[rentry_id] = this.all_entries[rentry_id].definition_loaded;
+                  this.entry_unload(rentry_id, False);
+                  unloaded.push(rentry_id);
+                }
+            }
           }
-        }
+      }
       if (len(reload_definitions)) {
         id_from_definition = false;
         definitions = reload_definitions;
@@ -433,16 +436,26 @@ AutomatoSystem = function(caller_context) {
     }
     
     if (loaded_defs) {
-      console.debug("SYSTEM> Loading entries, initializing {entries} ...".format({entries: Object.keys(loaded_defs)}));
+      // Final loading phase, install final features. This must be done BEFORE init hooks (they must receive a fully loaded entry)
       for (let entry_id in loaded_defs) {
-        this._entry_load_init(loaded_defs[entry_id]);
+        this._entry_definition_normalize_after_load(loaded_defs[entry_id]);
+        this._entry_events_install(loaded_defs[entry_id]);
+        this._entry_actions_install(loaded_defs[entry_id]);
+        this._entry_add_to_index(loaded_defs[entry_id]);
+        loaded_defs[entry_id].loaded = true;
+      }
+      
+      console.debug("SYSTEM> Loading entries, initializing {entries} ...".format({entries: Object.keys(loaded_defs)}));
+      // Calls handler_on_entry_init
+      for (let entry_id in loaded_defs)
         if (this.handler_on_entry_init)
           for (let h of this.handler_on_entry_init.values())
             h(loaded_defs[entry_id]);
-      }
+      // Calls handler_on_entry_init_batch
       if (this.handler_on_entry_init_batch)
         for (let h of this.handler_on_entry_init_batch.values())
           h(loaded_defs);
+
       console.debug("SYSTEM> Loaded entries {entries}.".format({entries: Object.keys(loaded_defs)}));
     }
     
@@ -484,6 +497,7 @@ AutomatoSystem = function(caller_context) {
     if (entry_id in this.all_entries) {
       if (new_signature && this.all_entries_signatures[entry_id] == new_signature)
         return null;
+      console.debug("SYSTEM> Entry definition for {entry} changed signature, reloading it...".format({entry: entry_id}));
       this.entry_unload(entry_id);
     }
     
@@ -503,15 +517,6 @@ AutomatoSystem = function(caller_context) {
     return entry;
   }
 
-  this._entry_load_init = function(entry) {
-    this._entry_definition_normalize_after_load(entry);
-    this._entry_events_install(entry);
-    this._entry_actions_install(entry);
-    this._entry_add_to_index(entry);
-
-    entry.loaded = true;
-  }
-    
   this.entry_unload = function(entry_ids, call_on_entries_change = true) {
     if (typeof entry_ids == "string")
       entry_ids = [ entry_ids ];
