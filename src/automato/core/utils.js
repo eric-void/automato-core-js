@@ -644,3 +644,7 @@ function md5_hexdigest(string) {
 function data_signature(data) {
   return md5_hexdigest(json_sorted_encode(data, true));
 }
+
+function camel_to_snake_case(string) {
+  return string.replace(/(.)([A-Z][a-z]+)/, "$1_$2").replace(/__([A-Z])/, '_$1').replace(/([a-z0-9])([A-Z])/, '$1_$2').toLowerCase();
+}

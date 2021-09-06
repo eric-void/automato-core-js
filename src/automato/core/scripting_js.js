@@ -30,6 +30,7 @@ function AutomatoScriptingJs(system, caller_context) {
       'is_array': is_array,
       'is_dict': is_dict,
       'print': console.log,
+      'camel_to_snake_case': camel_to_snake_case,
       '_': _,
     }, this.exports, context);
     return res;
@@ -141,7 +142,7 @@ function AutomatoScriptingJs(system, caller_context) {
     }
   }
   
-  this._script_code_uses_full_var = function(code, v){
+  this._script_code_uses_full_var = function(code, v) {
     // Return if code uses the var, without dict key reference ("payload[x]" or "x in payload" uses key reference, "payload" not)
     //return re.search(r'\b' + var + r'(\.|\[)', code)
     let parts = code.split(new RegExp('\\b' + v + '\\b'));
