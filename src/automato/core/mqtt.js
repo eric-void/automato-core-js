@@ -20,6 +20,8 @@ AutomatoMqtt = function(system) {
   this.mqtt_communication_threads_count = 10;
   this.mqtt_communication_queue = null;
   this.mqtt_communication_queue_only_subscribe = true; // False = use queue for publish and subscribe, True = use it only for subscribe
+  this.mqtt_communication_recent_delay = 0;
+  this.mqtt_communication_recent_delay_timems = 0;
 
   // Used by test environment, to "pause" the mqtt listening thread
   // TODO JS: UNSUPPORTED
@@ -120,11 +122,14 @@ AutomatoMqtt = function(system) {
    * @return ms of delay in current messages queue
    */
   this.queueDelay = function() {
+    /*
     try {
       return this.mqtt_communication_queue.length ? system.timems() - this.mqtt_communication_queue[0]['timems'] : 0;
     } catch (exception) {
       return 0;
     }
+    */
+    return this.mqtt_communication_recent_delay;
   }
 
   this._mqtt_communication_thread = async function() {
@@ -132,11 +137,23 @@ AutomatoMqtt = function(system) {
     while (thread_check(this)) {
       let d = this.context.mqtt_communication_queue.shift();
       if (d) {
-        let delay = system.timems() - d['timems'];
-        // Ignoring first 60 seconds from mqtt connections for warnings: i can receive a lot of retained messages, a slowdown is normal!
-        let slow = system.time() > this.context.connected_since + 60 && delay > this.context.settings['warning_slow_queue_ms']
+        let timems = system.timems();
+        let delay = timems - d['timems'];
+        // Ignoring first 300 seconds from mqtt connections for warnings: i can receive a lot of retained messages, a slowdown is normal!
+        let slow = system.time() > this.context.connected_since + 300 && delay > this.context.settings['warning_slow_queue_ms']
         if (slow)
           console.warn("Slow mqtt_communication_queue, last message fetched in {ms} ms: {msg}".format({ms: delay, msg: d}));
+        if (this.mqtt_communication_recent_delay > 0 && this.mqtt_communication_recent_delay_timems < timems - 60000) {
+          this.mqtt_communication_recent_delay = this.mqtt_communication_recent_delay / Math.pow(2, (timems - this.mqtt_communication_recent_delay_timems) / 1000);
+          if (this.mqtt_communication_recent_delay < 1000)
+            this.mqtt_communication_recent_delay = 0;
+          this.mqtt_communication_recent_delay_timems = this.mqtt_communication_recent_delay > 0 ? timems : 0;
+        }
+        if (delay > this.mqtt_communication_recent_delay) {
+          this.mqtt_communication_recent_delay = delay;
+          this.mqtt_communication_recent_delay_timems = timems;
+        }
+        
         if (d['type'] == 'publish')
           this.context._mqtt_communication_publish(d['topic'], d['payload'], d['qos'], d['retain']);
 
