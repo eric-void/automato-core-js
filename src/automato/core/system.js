@@ -48,6 +48,7 @@ AutomatoSystem = function(caller_context) {
   const EVENT_KEYS = ['port'];
 
   this.index_topic_cache = { 'hits': 0, 'miss': 0, 'data': {} };
+  // this.index_topic_cache_lock TODO
   this.INDEX_TOPIC_CACHE_MAXSIZE = 1024;
   this.INDEX_TOPIC_CACHE_PURGETIME = 3600;
 
