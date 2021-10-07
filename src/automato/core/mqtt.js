@@ -119,17 +119,21 @@ AutomatoMqtt = function(system) {
   }
   
   /**
-   * @return ms of delay in current messages queue
+   * @return ms of delay in current messages queue (max delay in last minute)
    */
   this.queueDelay = function() {
-    /*
+    return this.mqtt_communication_recent_delay;
+  }
+  
+  /**
+   * @return ms of delay in current messages queue (actual)
+   */
+  this.queueDelayCurrent = function() {
     try {
       return this.mqtt_communication_queue.length ? system.timems() - this.mqtt_communication_queue[0]['timems'] : 0;
     } catch (exception) {
       return 0;
     }
-    */
-    return this.mqtt_communication_recent_delay;
   }
 
   this._mqtt_communication_thread = async function() {
