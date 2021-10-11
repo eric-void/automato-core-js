@@ -381,6 +381,7 @@ AutomatoSystem = function(caller_context) {
     let loaded_defs = {};
     let loading_defs = {};
     let reload_definitions = {};
+    let skipped_ids = [];
     let unloaded = [];
     while (len(definitions)) {
       for (let definition in definitions) {
@@ -389,13 +390,14 @@ AutomatoSystem = function(caller_context) {
           entry_id = definition;
         definition = definitions[definition];
         if (!('disabled' in definition) || !definition['disabled']) {
-          let entry = this._entry_load_definition(definition, node_name, entry_id, generate_new_entry_id_on_conflict);
-          if (entry) {
+          let result = this._entry_load_definition(definition, node_name, entry_id, generate_new_entry_id_on_conflict, /* extended_result = */true);
+          if (result && result['entry']) {
             if (this.handler_on_entry_load)
               for (let h of this.handler_on_entry_load.values())
-                h(entry);
-            loading_defs[entry.id] = entry;
-          }
+                h(result['entry']);
+            loading_defs[result['entry'].id] = result['entry'];
+          } else if (result['message'] == 'no_changes')
+            skipped_ids.push(result['id'])
         }
       }
       if (len(loading_defs)) {
@@ -428,7 +430,7 @@ AutomatoSystem = function(caller_context) {
     if (unload_other_from_node) {
       let todo_unload = [];
       for (let entry_id in this.all_entries)
-        if (this.all_entries[entry_id].node_name == node_name && !(entry_id in loaded_defs))
+        if (this.all_entries[entry_id].node_name == node_name && !(entry_id in loaded_defs) && !skipped_ids.includes(entry_id))
           todo_unload.push(entry_id);
       for (let entry_id of todo_unload) {
         this.entry_unload(entry_id);
@@ -465,9 +467,9 @@ AutomatoSystem = function(caller_context) {
         h(Object.keys(loaded_defs), unloaded);
   }
   
-  this._entry_load_definition = function(definition, from_node_name = false, entry_id = false, generate_new_entry_id_on_conflict = false) {
+  this._entry_load_definition = function(definition, from_node_name = false, entry_id = false, generate_new_entry_id_on_conflict = false, extended_result = false) {
     if (!isinstance(definition, 'dict'))
-      return null;
+      return !extended_result ? null : { "entry": null, "id": entry_id, "message": "error_invalid_definition" };
 
     if (!from_node_name) {
       let d = entry_id ? entry_id.indexOf("@") : -1;
@@ -477,7 +479,7 @@ AutomatoSystem = function(caller_context) {
     if (!entry_id)
       entry_id = 'id' in definition ? definition['id'] : ('item' in definition ? definition['item'] : ('module' in definition ? definition['module'] : ('device' in definition ? definition['device'] : (''))));
     if (!entry_id)
-      return null;
+      return !extended_result ? null : { "entry": null, "id": entry_id, "message": "error_no_id" };
     entry_id = entry_id.replace(/[^A-Za-z0-9@_-]+/g, '-');
     let d = entry_id.indexOf("@");
     if (d < 0)
@@ -497,7 +499,7 @@ AutomatoSystem = function(caller_context) {
     let new_signature = data_signature(definition);
     if (entry_id in this.all_entries) {
       if (new_signature && this.all_entries_signatures[entry_id] == new_signature)
-        return null;
+        return !extended_result ? null : { "entry": null, "id": entry_id, "message": "no_changes" };
       console.debug("SYSTEM> Entry definition for {entry} changed signature, reloading it...".format({entry: entry_id}));
       this.entry_unload(entry_id);
     }
@@ -515,7 +517,7 @@ AutomatoSystem = function(caller_context) {
     if (!(entry.node_name in this.all_nodes))
       this.all_nodes[entry.node_name] = {};
     
-    return entry;
+    return !extended_result ? entry : { "entry": entry, "id": entry_id, "message": null };
   }
 
   this.entry_unload = function(entry_ids, call_on_entries_change = true) {
