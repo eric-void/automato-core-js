@@ -1529,13 +1529,13 @@ AutomatoSystem = function(caller_context) {
               let _s = this._stats_start();
               if (condition == null || this._entry_event_params_match_condition(eventdata, condition))
                 //console.debug("_entry_event_invoke_listeners_GO")
-                listener(entry, eventname, eventdata, caller, published_message);
+                listener(entry, eventname, deepcopy(eventdata), caller, published_message);
               this._stats_end('event_listener(' + listener + '|' + condition + ')', _s);
             }
     
     if (this.handler_on_all_events)
       for (let h of this.handler_on_all_events.values())
-        h(entry, eventname, eventdata, caller, published_message);
+        h(entry, eventname, deepcopy(eventdata), caller, published_message);
   }
 
   this._entry_event_params_match_condition = function(eventdata, condition) {
