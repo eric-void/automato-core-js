@@ -93,6 +93,7 @@ AutomatoSystem = function(caller_context) {
     this.events_listeners = {};
     this.events_published = {};
     // this.events_published_lock = null; # TODO Thread locking in js class is disabled
+    this.events_groups = {};
     this.index_topic_published = {};
     this.index_topic_subscribed = {};
     scripting_js.exports = this.exports;
@@ -1311,7 +1312,8 @@ AutomatoSystem = function(caller_context) {
                     _s = system._stats_start();
                     let eventdata = system._entry_event_publish(this.entry, event['name'], event['params'], !message.retain ? system.time() : 0);
                     system._stats_end('PublishedMessages.event_publish', _s);
-                    this._events.push(eventdata);
+                    if (eventdata)
+                      this._events.push(eventdata);
                   }
                 }
               }
@@ -1434,6 +1436,15 @@ AutomatoSystem = function(caller_context) {
     data['keys'] = params ? Object.fromEntries( Object.entries(params).map(function(v) { return event_keys.includes(v[0]) ? v : null }).filter(function(v) { return v; }) ) : {};
     let keys_index = this.entry_event_keys_index(data['keys']);
     
+    if (time > 0 && (entry.id + '.' + eventname) in this.events_groups) {
+      this.events_groups_push(entry.id + '.' + eventname, entry, data, event_keys, keys_index);
+      return null;
+    }
+
+    return this._entry_event_publish_internal(entry, eventname, params, time, data, event_keys, keys_index);
+  }
+  
+  this._entry_event_publish_internal = function(entry, eventname, params, time, data, event_keys, keys_index) {
     // If this is a new keys_index, i must merge data with empty keys_index (if present)
     if (keys_index != '{}' && eventname in this.events_published && entry.id in this.events_published[eventname] && '{}' in this.events_published[eventname][entry.id] && !(keys_index in this.events_published[eventname][entry.id]))
       for (k in this.events_published[eventname][entry.id]['{}']['params'])
@@ -1546,9 +1557,10 @@ AutomatoSystem = function(caller_context) {
   }
 
   this._entry_event_publish_and_invoke_listeners = function(entry, eventname, params, time, caller, published_message) {
-    // @param caller is "events_passthrough" in case of events_passthrough
+    // @param caller is "events_passthrough" in case of events_passthrough, "group" for event grouping (see events_groups)
     let eventdata = this._entry_event_publish(entry, eventname, params, time);
-    this._entry_event_invoke_listeners(entry, eventdata, caller, published_message);
+    if (eventdata)
+      this._entry_event_invoke_listeners(entry, eventdata, caller, published_message);
   }
 
   this.entry_topic_lambda = function(entry) {
@@ -1725,11 +1737,56 @@ AutomatoSystem = function(caller_context) {
       if (expired_response)
         this.subscribed_response = this.subscribed_response.filter(function(x) { return !expired_response.includes(x); });
 
+      this.events_groups_check();
       await thread_sleep(.5);
     }
   }
 
+  this.events_groups_push = function(egkey, entry, data, event_keys, keys_index) {
+    if (keys_index in this.events_groups[egkey]['data'] && data['time'] - this.events_groups[egkey]['data'][keys_index]['time'] >= this.events_groups[egkey]['group_time']) {
+      let eventdata = _entry_event_publish_internal(entry, data['name'], this.events_groups[egkey]['data'][keys_index]['data']['params'], this.events_groups[egkey]['data'][keys_index]['data']['time'], this.events_groups[egkey]['data'][keys_index]['data'], event_keys, keys_index)
+      if (eventdata)
+        _entry_event_invoke_listeners(entry, eventdata, 'group', null);
+      delete this.events_groups[egkey]['data'][keys_index];
+    }
+    if (!(keys_index in this.events_groups[egkey]['data']))
+      this.events_groups[egkey]['data'][keys_index] = {
+        'time': data['time'], 
+        'data': data,
+      };
+    else
+      for (let k in data['params'])
+        this.events_groups[egkey]['data'][keys_index]['data']['params'][k] = data['params'][k];
+  }
 
+  this.events_groups_check = function() {
+    let now = mqtt.queueTimems()
+    if (now > 0)
+      now = Math.floor(now / 1000)
+    else
+      now = this.time();
+    for (let egkey in this.events_groups) {
+      let to_delete = [];
+      for (let keys_index in this.events_groups[egkey]['data']) {
+        if (now - this.events_groups[egkey]['data'][keys_index]['time'] >= this.events_groups[egkey]['group_time']) {
+          let d = egkey.indexOf(".");
+          if (d > 0) {
+            let entry = this.entry_get(egkey.slice(0, d));
+            if (entry) {
+              let eventname = egkey.slice(d + 1);
+              let event_keys = this.entry_event_keys(entry, eventname);
+              let eventdata = this._entry_event_publish_internal(entry, eventname, this.events_groups[egkey]['data'][keys_index]['data']['params'], this.events_groups[egkey]['data'][keys_index]['data']['time'], this.events_groups[egkey]['data'][keys_index]['data'], event_keys, entry_event_keys_index(this.events_groups[egkey]['data'][keys_index]['data']['keys']));
+              if (eventdata)
+                this._entry_event_invoke_listeners(entry, eventdata, 'group', null);
+              to_delete.append(keys_index);
+            }
+          }
+        }
+      }
+      for (let i of to_delete)
+        delete this.events_groups[egkey]['data'][keys_index];
+    }
+  }
 
 
 
@@ -1762,8 +1819,20 @@ AutomatoSystem = function(caller_context) {
             let data = isinstance(entry.definition['publish'][topic]['events'][eventname], 'list') ? entry.definition['publish'][topic]['events'][eventname] : [ entry.definition['publish'][topic]['events'][eventname] ];
             for (let eventparams of data) 
               this._entry_event_publish(entry, eventname.slice(0, -5), eventparams, -1);
-          }
+          } else if (eventname.endswith(':group') && isinstance(entry.definition['publish'][topic]['events'][eventname], 'int') && entry.definition['publish'][topic]['events'][eventname] > 0)
+            this.events_groups[entry.id + '.' + eventname.slice(0, -6)] = { 'group_time': entry.definition['publish'][topic]['events'][eventname], 'data': {}};
         }
+    if ('events' in entry.definition)
+      for (let eventname in entry.definition['events']) {
+        if (eventname.endsWith(":keys"))
+          entry.events_keys[eventname.slice(0, -5)] = entry.definition['events'][eventname];
+        else if (eventname.endsWith(":init")) {
+          let data = isinstance(entry.definition['events'][eventname], 'list') ? entry.definition['events'][eventname] : [ entry.definition['events'][eventname] ];
+          for (let eventparams of data) 
+            this._entry_event_publish(entry, eventname.slice(0, -5), eventparams, -1);
+        } else if (eventname.endswith(':group') && isinstance(entry.definition['events'][eventname], 'int') && entry.definition['events'][eventname] > 0)
+          this.events_groups[entry.id + '.' + eventname.slice(0, -6)] = { 'group_time': entry.definition['events'][eventname], 'data': {}};
+      }
         
     // events_passthrough translates in event_propagation via on/events definition
     if ('events_passthrough' in entry.definition)
@@ -1810,6 +1879,16 @@ AutomatoSystem = function(caller_context) {
             }
           }
         }
+    if ('actions' in entry.definition)
+      for (let actionname in entry.definition['actions']) {
+        if (actionname.endsWith(":init")) {
+          let data = isinstance(entry.definition['actions'][actionname], 'list') ? entry.definition['actions'][actionname] : [ entry.definition['actions'][actionname] ];
+          for (let eventparams of data) {
+            entry.events['action/' + actionname.slice(0, -5)] = [ '#action' ];
+            this._entry_event_publish(entry, 'action/' + actionname.slice(0, -5), eventparams, -1);
+          }
+        }
+      }
   }
 
   this.entry_support_event = function(entry, eventname) {
