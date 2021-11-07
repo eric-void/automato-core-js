@@ -135,6 +135,14 @@ AutomatoMqtt = function(system) {
       return 0;
     }
   }
+  
+  this.queueTimems = function() {
+    try {
+      return this.mqtt_communication_queue.length ? this.mqtt_communication_queue[0]['timems'] : 0;
+    } catch (exception) {
+      return 0;
+    }
+  }
 
   this._mqtt_communication_thread = async function() {
     //console.warn("_mqtt_communication_thread");
