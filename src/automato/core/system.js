@@ -42,6 +42,8 @@ AutomatoSystem = function(caller_context) {
       "actions": true,
       "topic_match_priority": true,
     },
+    'events': true,
+    'actions': true,
     'events_passthrough': true,
   };
   const PRIMITIVE_TYPES = ['int', 'str', 'bool', 'float', 'dict', 'list'];
