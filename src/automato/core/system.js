@@ -1746,9 +1746,9 @@ AutomatoSystem = function(caller_context) {
 
   this.events_groups_push = function(egkey, entry, data, event_keys, keys_index) {
     if (keys_index in this.events_groups[egkey]['data'] && data['time'] - this.events_groups[egkey]['data'][keys_index]['time'] >= this.events_groups[egkey]['group_time']) {
-      let eventdata = _entry_event_publish_internal(entry, data['name'], this.events_groups[egkey]['data'][keys_index]['data']['params'], this.events_groups[egkey]['data'][keys_index]['data']['time'], this.events_groups[egkey]['data'][keys_index]['data'], event_keys, keys_index)
+      let eventdata = this._entry_event_publish_internal(entry, data['name'], this.events_groups[egkey]['data'][keys_index]['data']['params'], this.events_groups[egkey]['data'][keys_index]['data']['time'], this.events_groups[egkey]['data'][keys_index]['data'], event_keys, keys_index)
       if (eventdata)
-        _entry_event_invoke_listeners(entry, eventdata, 'group', null);
+        this._entry_event_invoke_listeners(entry, eventdata, 'group', null);
       delete this.events_groups[egkey]['data'][keys_index];
     }
     if (!(keys_index in this.events_groups[egkey]['data']))
@@ -1777,15 +1777,15 @@ AutomatoSystem = function(caller_context) {
             if (entry) {
               let eventname = egkey.slice(d + 1);
               let event_keys = this.entry_event_keys(entry, eventname);
-              let eventdata = this._entry_event_publish_internal(entry, eventname, this.events_groups[egkey]['data'][keys_index]['data']['params'], this.events_groups[egkey]['data'][keys_index]['data']['time'], this.events_groups[egkey]['data'][keys_index]['data'], event_keys, entry_event_keys_index(this.events_groups[egkey]['data'][keys_index]['data']['keys']));
+              let eventdata = this._entry_event_publish_internal(entry, eventname, this.events_groups[egkey]['data'][keys_index]['data']['params'], this.events_groups[egkey]['data'][keys_index]['data']['time'], this.events_groups[egkey]['data'][keys_index]['data'], event_keys, this.entry_event_keys_index(this.events_groups[egkey]['data'][keys_index]['data']['keys']));
               if (eventdata)
                 this._entry_event_invoke_listeners(entry, eventdata, 'group', null);
-              to_delete.append(keys_index);
+              to_delete.push(keys_index);
             }
           }
         }
       }
-      for (let i of to_delete)
+      for (let keys_index of to_delete)
         delete this.events_groups[egkey]['data'][keys_index];
     }
   }
@@ -1832,7 +1832,7 @@ AutomatoSystem = function(caller_context) {
           let data = isinstance(entry.definition['events'][eventname], 'list') ? entry.definition['events'][eventname] : [ entry.definition['events'][eventname] ];
           for (let eventparams of data) 
             this._entry_event_publish(entry, eventname.slice(0, -5), eventparams, -1);
-        } else if (eventname.endswith(':group') && isinstance(entry.definition['events'][eventname], 'int') && entry.definition['events'][eventname] > 0)
+        } else if (eventname.endsWith(':group') && isinstance(entry.definition['events'][eventname], 'int') && entry.definition['events'][eventname] > 0)
           this.events_groups[entry.id + '.' + eventname.slice(0, -6)] = { 'group_time': entry.definition['events'][eventname], 'data': {}};
       }
         
