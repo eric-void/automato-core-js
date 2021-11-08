@@ -96,6 +96,7 @@ AutomatoSystem = function(caller_context) {
     this.events_published = {};
     // this.events_published_lock = null; # TODO Thread locking in js class is disabled
     this.events_groups = {};
+    // this.events_groups_lock = null; # TODO Thread locking in js class is disabled
     this.index_topic_published = {};
     this.index_topic_subscribed = {};
     scripting_js.exports = this.exports;
