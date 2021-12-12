@@ -1377,14 +1377,18 @@ AutomatoSystem = function(caller_context) {
     this._current_received_message.message = m;
     
     // invoke events listeners
-    let _s = this._stats_start();
     for (let pm of m.publishedMessages().values()) {
       pm.entry.last_seen = Math.floor(timems / 1000);
-      for (let eventdata of pm.events())
+      let _s = this._stats_start();
+      let events = pm.events();
+      this._stats_end('on_mqtt_message.generate_events', _s);
+      this._stats_end('on_mqtt_message(' + topic + ').generate_events', _s);
+      _s = this._stats_start();
+      for (let eventdata of events)
         this._entry_event_invoke_listeners(pm.entry, eventdata, 'message', pm);
+      this._stats_end('on_mqtt_message.invoke_elisteners', _s);
+      this._stats_end('on_mqtt_message(' + topic + ').invoke_elisteners', _s);
     }
-    this._stats_end('on_mqtt_message.invoke_listeners', _s);
-    this._stats_end('on_mqtt_message(' + topic + ').invoke_listeners', _s);
     
     // manage responses callbacks
     _s = this._stats_start();
@@ -1993,7 +1997,7 @@ AutomatoSystem = function(caller_context) {
     return Object.keys(entry.actions);
   }
 
-  this.do_action = function(actionref, params, reference_entry_id = null, if_event_not_match = false, if_event_not_match_keys = false, if_event_not_match_timeout = null) {
+  this.do_action = function(actionref, params = {}, reference_entry_id = null, if_event_not_match = false, if_event_not_match_keys = false, if_event_not_match_timeout = null) {
     let d = this.decode_action_reference(actionref, /*default_entry_id = */reference_entry_id)
     return d ? this.entry_do_action(d['entry'], d['action'], params, d['init'], if_event_not_match, if_event_not_match_keys, if_event_not_match_timeout) : null;
   }
