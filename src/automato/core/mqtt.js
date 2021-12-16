@@ -156,7 +156,7 @@ AutomatoMqtt = function(system) {
         if (slow)
           console.warn("Slow mqtt_communication_queue, last message fetched in {ms} ms: {msg}".format({ms: delay, msg: d}));
         if (this.mqtt_communication_recent_delay > 0 && this.mqtt_communication_recent_delay_timems < timems - 60000) {
-          this.mqtt_communication_recent_delay = this.mqtt_communication_recent_delay / Math.pow(2, (timems - this.mqtt_communication_recent_delay_timems) / 1000);
+          this.mqtt_communication_recent_delay = timems - this.mqtt_communication_recent_delay_timems < 3600000 ? this.mqtt_communication_recent_delay / Math.pow(2, (timems - this.mqtt_communication_recent_delay_timems) / 1000) : 0;
           if (this.mqtt_communication_recent_delay < 1000)
             this.mqtt_communication_recent_delay = 0;
           this.mqtt_communication_recent_delay_timems = this.mqtt_communication_recent_delay > 0 ? timems : 0;

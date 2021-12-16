@@ -302,7 +302,7 @@ AutomatoSystem = function(caller_context) {
     }
     let _tpsize = Object.values(this.index_topic_cache['data']).map(function(x) { return len(x); });
     console.info(('SYSTEM> DEBUG TIMINGS\n  total: {total}min\n' +
-      '  mqtt_queue_delay: {delay}ms (current: {cdelay}, size: {size})\n' + 
+      '  mqtt_queue_delay: {cdelay}ms (recent/load: {cdelay}, queue length: {size})\n' + 
       '  script_eval_cache: {schits}/{sctotal} hits ({scperc}%), {scsize} size, {scskip} uncacheable, {scdisabled} cache disabled, {scsign} signatures\n' + 
       '  topic cache: {tphits}/{tptotal} ({tpperc}%) hits, {tpsize} size\n' + 
       '  system_stats:\n{stats}').format({
@@ -670,11 +670,9 @@ AutomatoSystem = function(caller_context) {
       for (let k in eventdata['keys'])
         delete params[k];
     }
-    if ('init' in passthrough_conf) {
-      let context = scripting_js.script_context({ 'params': params });
-      scripting_js.script_exec(passthrough_conf['init'], context);
-    }
-    this._entry_event_publish_and_invoke_listeners(dest_entry, ("rename" in passthrough_conf) && passthrough_conf["rename"] ? passthrough_conf["rename"] : eventname, params, eventdata['time'], 'events_passthrough', published_message);
+    if ('init' in passthrough_conf)
+      let exec_context = scripting_js.script_exec(passthrough_conf['init'], { 'params': params });
+    this._entry_event_publish_and_invoke_listeners(dest_entry, ("rename" in passthrough_conf) && passthrough_conf["rename"] ? passthrough_conf["rename"] : eventname, 'init' in passthrough_conf ? exec_context['params'] : params, eventdata['time'], 'events_passthrough', published_message);
   }
 
   /*
@@ -2028,22 +2026,20 @@ AutomatoSystem = function(caller_context) {
       }
     
       let publish = null;
-      let action_full_params = null;
+      let exec_context = { 'params': params };
       for (let topic of entry.actions[action]) {
         let actiondef = entry.definition['subscribe'][topic]['actions'][action];
         if (isinstance(actiondef, 'str'))
           actiondef = { 'payload': actiondef };
         if (actiondef['payload']) {
-          let context = scripting_js.script_context({ 'params': params });
           if ('init' in actiondef && actiondef['init'])
-            scripting_js.script_exec(actiondef['init'], context);
+            exec_context = scripting_js.script_exec(actiondef['init'], exec_context);
           if (init)
-            scripting_js.script_exec(init, context);
-          action_full_params = context.params;
-          let payload = scripting_js.script_eval(actiondef['payload'], context, /*to_dict = */true);
+            exec_context = scripting_js.script_exec(init, context, exec_context);
+          let payload = scripting_js.script_eval(actiondef['payload'], exec_context, /*to_dict = */true);
           if (payload != null) {
             if ('topic' in actiondef && actiondef['topic'])
-              topic = scripting_js.script_eval(actiondef['topic'], context, /*to_dict = */true);
+              topic = scripting_js.script_eval(actiondef['topic'], exec_context, /*to_dict = */true);
             publish = [topic, payload];
             break;
           }
@@ -2055,7 +2051,7 @@ AutomatoSystem = function(caller_context) {
 
       if (publish) {
         entry.publish(publish[0], publish[1]);
-        this.event_get_invalidate_on_action(entry, action, action_full_params, if_event_not_match);
+        this.event_get_invalidate_on_action(entry, action, exec_context['params'], if_event_not_match);
         return true;
       }
     }
@@ -2229,7 +2225,7 @@ AutomatoSystem = function(caller_context) {
     /*
     Transform an action reference to a valid event reference.
     Delete the "-set" postfix to action name and replace "=" with "==" and ";" with "&&" in init code
-    Example: "js: action-set(js: params['x'] = 1; params['y'] = 2;" > "js: action(js: params['x'] == 1 && params['y'] == 2)"
+    Example: "js: action-set(js: params['x'] = 1; params['y'] = 2;)" > "js: action(js: params['x'] == 1 && params['y'] == 2)"
     */
     let d = !isinstance(actionref, 'dict') ? this.decode_action_reference(actionref, /*default_entry_id = */null, /*default_action = */null, /*no_action = */true) : actionref;
     if (!d)
@@ -2246,7 +2242,7 @@ AutomatoSystem = function(caller_context) {
     /*
     Transform an event reference to a valid action reference.
     Add the "-set" postfix to event name and replace "==" with "=" and "&&" with ";" in condition
-    Example: "js: event(js: params['x'] == 1 && params['y'] == 2)" > "js: event-set(js: params['x'] = 1; params['y'] = 2;"
+    Example: "js: event(js: params['x'] == 1 && params['y'] == 2)" > "js: event-set(js: params['x'] = 1; params['y'] = 2;)"
     */
     let d = !isinstance(eventref, 'dict') ? decode_event_reference(eventref, /*default_entry_id = */null, /*default_event = */null, /*no_event = */true) : eventref;
     if (!d)

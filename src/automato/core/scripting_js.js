@@ -152,7 +152,8 @@ function AutomatoScriptingJs(system, caller_context) {
     return false;
   }
   
-  this.script_exec = function(code, context = {}) {
+  this.script_exec = function(code, context = {}, return_context = true) {
+    let ret = null;
     let _s = system._stats_start();
     if (code.startsWith('js:'))
       code = code.slice(3).trim();
@@ -160,10 +161,17 @@ function AutomatoScriptingJs(system, caller_context) {
       this_context = this.script_context(context);
       (new Function( "with(this) { " + code + "}")).call(this_context);
       this.script_context_return(this_context, context);
+      if (return_context) {
+        ret = {};
+        for (let k in isinstance(return_context), 'list') ? return_context : context)
+          ret[k] = context[k];
+      }
+      
     } catch (exception) {
       console.error('scripting_js> error executing js script: {code}\ncontext: {context}\n'.format({code: code, context: context}), exception);
     }
     system._stats_end('scripting_js.script_exec', _s);
+    return ret;
   }
 
 }
