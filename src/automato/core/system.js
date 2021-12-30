@@ -345,6 +345,7 @@ AutomatoSystem = function(caller_context) {
     this.type = this.definition['type'];
     this.created = system.time();
     this.last_seen = 0;
+    this.publish_last_seen = {};
     this.exports = system.exports;
     this.topic_rule_aliases = {};
     this.topic = system.entry_topic_lambda(this).bind(system);
@@ -618,11 +619,16 @@ AutomatoSystem = function(caller_context) {
           if (!(k in entry.definition['publish'][topic_rule]))
             entry.definition['publish'][topic_rule][k] = entry.definition[k];
 
+    if ('ignore_interval' in entry.definition)
+      entry.definition['ignore_interval'] = read_duration(entry.definition['ignore_interval']);
+
     if ('publish' in entry.definition) {
       let res = {};
       for (let topic_rule in entry.definition['publish']) {
         if ('topic' in entry.definition['publish'][topic_rule])
           entry.topic_rule_aliases[topic_rule] = entry.topic(entry.definition['publish'][topic_rule]['topic']);
+        if ('ignore_interval' in entry.definition['publish'][topic_rule])
+          entry.definition['publish'][topic_rule]['ignore_interval'] = read_duration(entry.definition['publish'][topic_rule]['ignore_interval']);
         res[entry.topic(topic_rule)] = entry.definition['publish'][topic_rule];
       }
       entry.definition['publish'] = res;
@@ -1218,8 +1224,26 @@ AutomatoSystem = function(caller_context) {
         
         _s = system._stats_start();
         this._publishedMessages = [];
-        for (let entry_id in entries)
-          this._publishedMessages.push(new system.PublishedMessage(system, this, entries[entry_id]['entry'], entries[entry_id]['topic'], entries[entry_id]['definition'], entries[entry_id]['matches'] != [true] ? entries[entry_id]['matches'] : []));
+        for (let entry_id in entries) {
+          let ignored = false;
+          if ("ignore" in entries[entry_id]['entry'].definition)
+            ignored = entries[entry_id]['entry'].definition["ignore"];
+          if (!ignored && "ignore" in entries[entry_id]['definition'])
+            ignored = entries[entry_id]['definition']["ignore"];
+          if (!ignored) {
+            let ignore_interval = 0;
+            if ("ignore_interval" in entries[entry_id]['entry'].definition)
+              ignore_interval = entries[entry_id]['entry'].definition["ignore_interval"];
+            if ("ignore_interval" in entries[entry_id]['definition'])
+              ignore_interval = entries[entry_id]['definition']["ignore_interval"];
+            if (ignore_interval > 0 && this.topic in entries[entry_id]['entry'].publish_last_seen && (timems() / 1000) - entries[entry_id]['entry'].publish_last_seen[this.topic] < ignore_interval * 0.99)
+              ignored = true
+          }
+          if (!ignored)
+            this._publishedMessages.push(new system.PublishedMessage(system, this, entries[entry_id]['entry'], entries[entry_id]['topic'], entries[entry_id]['definition'], entries[entry_id]['matches'] != [true] ? entries[entry_id]['matches'] : []));
+          //else
+          //  logging.debug("SYSTEM> Ignored publishedmessage {entry_id}.{topic_rule} ({topic})".format({entry_id: entry_id, topic_rule: entries[entry_id]['topic'], topic: self.topic}));
+        }
         system._stats_end('Message.publishedMessages().create', _s);
         system._stats_end('Message(' + this.topic + ').publishedMessages().create', _s);
       }
@@ -1377,6 +1401,7 @@ AutomatoSystem = function(caller_context) {
     // invoke events listeners
     for (let pm of m.publishedMessages().values()) {
       pm.entry.last_seen = Math.floor(timems / 1000);
+      pm.entry.publish_last_seen[topic] = Math.floor(timems / 1000);
       let _s = this._stats_start();
       let events = pm.events();
       this._stats_end('on_mqtt_message.generate_events', _s);
