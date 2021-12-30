@@ -648,3 +648,16 @@ function data_signature(data) {
 function camel_to_snake_case(string) {
   return string.replace(/(.)([A-Z][a-z]+)/, "$1_$2").replace(/__([A-Z])/, '_$1').replace(/([a-z0-9])([A-Z])/, '$1_$2').toLowerCase();
 }
+
+function payload_transfer(base_result, payload, keys, empty_result = null) {
+  let result = {};
+  if (is_list(keys))
+    for (let k of keys)
+      if (k in payload)
+        result[k] = payload[k];
+  else if (is_dict(keys))
+    for (let k in keys)
+      if (k in payload)
+        result[keys[k]] = payload[k];
+  return Object.keys(result).length ? dict_merge(base_result, result) : empty_result;
+}

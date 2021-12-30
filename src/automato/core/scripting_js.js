@@ -31,6 +31,7 @@ function AutomatoScriptingJs(system, caller_context) {
       'is_dict': is_dict,
       'print': console.log,
       'camel_to_snake_case': camel_to_snake_case,
+      'payload_transfer': payload_transfer,
       '_': _,
     }, this.exports, context);
     return res;
@@ -175,6 +176,5 @@ function AutomatoScriptingJs(system, caller_context) {
   }
 
 }
-
 
 var scripting_js = new AutomatoScriptingJs(this);
