@@ -59,6 +59,8 @@ function AutomatoScriptingJs(system, caller_context) {
     try {
       if (code.startsWith('js:'))
         code = code.slice(3).trim();
+      else if (code.startsWith('jsf:'))
+        code = '(function() {' + code.slice(4).trim() + '})();';
       
       /* NOTE script_eval_cache DISABLED
       let key = null, keyhash = null;
@@ -177,7 +179,7 @@ function AutomatoScriptingJs(system, caller_context) {
       this.script_context_return(this_context, context);
       if (return_context) {
         ret = {};
-        for (let k in isinstance(return_context), 'list') ? return_context : context)
+        for (let k in (isinstance(return_context, 'list') ? return_context : context))
           ret[k] = context[k];
       }
       

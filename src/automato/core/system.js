@@ -676,8 +676,9 @@ AutomatoSystem = function(caller_context) {
       for (let k in eventdata['keys'])
         delete params[k];
     }
+    let exec_context = null;
     if ('init' in passthrough_conf)
-      let exec_context = scripting_js.script_exec(passthrough_conf['init'], { 'params': params });
+      exec_context = scripting_js.script_exec(passthrough_conf['init'], { 'params': params });
     this._entry_event_publish_and_invoke_listeners(dest_entry, ("rename" in passthrough_conf) && passthrough_conf["rename"] ? passthrough_conf["rename"] : eventname, 'init' in passthrough_conf ? exec_context['params'] : params, eventdata['time'], 'events_passthrough', published_message);
   }
 

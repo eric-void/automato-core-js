@@ -651,7 +651,7 @@ function camel_to_snake_case(string) {
 
 function payload_transfer(base_result, payload, keys, empty_result = null) {
   let result = {};
-  if (is_list(keys))
+  if (is_array(keys))
     for (let k of keys)
       if (k in payload)
         result[k] = payload[k];
