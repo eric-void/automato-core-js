@@ -1,10 +1,13 @@
 // TODO: For the future, i can consider using https://github.com/jterrace/js.js/
 
+// NOTE script_eval_cache has been disabled to mirror python behaviour: see notes about it (it was not working properly with some values - probably float ones - the same event was emitted with different payloads)
+
 function AutomatoScriptingJs(system, caller_context) {
   var context_mask = {};
   for (p in caller_context)
     context_mask[p] = undefined;
   
+  /* NOTE script_eval_cache DISABLED: not working properly
   this.script_eval_cache = {};
   this.script_eval_cache_hits = 0;
   this.script_eval_cache_miss = 0;
@@ -13,6 +16,7 @@ function AutomatoScriptingJs(system, caller_context) {
   this.script_eval_codecontext_signatures = {};
   this.SCRIPT_EVAL_CACHE_MAXSIZE = 1024;
   this.SCRIPT_EVAL_CACHE_PURGETIME = 3600;
+  */
 
   this.exports = {};
 
@@ -47,12 +51,16 @@ function AutomatoScriptingJs(system, caller_context) {
         delete original_context[k];
   }
 
+  /**
+   * @param cache Code excecution can be cached (this parameter is NOT used right now)
+   */
   this.script_eval = function(code, context = {}, cache = false) {
     let _s = system._stats_start();
     try {
       if (code.startsWith('js:'))
         code = code.slice(3).trim();
       
+      /* NOTE script_eval_cache DISABLED
       let key = null, keyhash = null;
       if (cache) {
         if (len(this.script_eval_cache) > this.SCRIPT_EVAL_CACHE_MAXSIZE) {
@@ -118,6 +126,7 @@ function AutomatoScriptingJs(system, caller_context) {
         this.script_eval_cache_miss += 1;
       } else
         this.script_eval_cache_disabled += 1;
+      */
       
       let _s2 = false;
       try {
@@ -126,8 +135,10 @@ function AutomatoScriptingJs(system, caller_context) {
         let ret = eval("with (this_context) { " + code + "}");
         this.script_context_return(this_context, context);
         
+        /* NOTE script_eval_cache DISABLED
         if (cache)
           this.script_eval_cache[keyhash] = { 'key': key, 'used': system.time(), 'result': ret };
+        */
         
         return ret;
       } catch (exception) {
@@ -143,6 +154,7 @@ function AutomatoScriptingJs(system, caller_context) {
     }
   }
   
+  /* NOTE script_eval_cache DISABLED
   this._script_code_uses_full_var = function(code, v) {
     // Return if code uses the var, without dict key reference ("payload[x]" or "x in payload" uses key reference, "payload" not)
     //return re.search(r'\b' + var + r'(\.|\[)', code)
@@ -152,6 +164,7 @@ function AutomatoScriptingJs(system, caller_context) {
         return true;
     return false;
   }
+  */
   
   this.script_exec = function(code, context = {}, return_context = true) {
     let ret = null;
