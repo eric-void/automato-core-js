@@ -1711,7 +1711,7 @@ AutomatoSystem = function(caller_context) {
     //
     let now = this.timems();
     let delay = Math.round(mqtt.queueDelay() / 1000 + 0.49) * 1000;
-    // If there is a lot of delay in mqtt queue, we can assume there are probably a lot of messages managed by mqtt broker, so it could be normal a slowly processing of messages. So we add some more delay (20%).
+    // If there is a lot of delay in mqtt queue, we can assume there are probably a lot of messages managed by mqtt broker, so it could be a normal slowly processing of messages. So we add some more delay (20%).
     delay = delay * 1.2;
     
     for (let x of this.subscribed_response.values()) {
