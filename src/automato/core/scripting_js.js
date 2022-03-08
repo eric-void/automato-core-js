@@ -25,6 +25,7 @@ function AutomatoScriptingJs(system, caller_context) {
       'now': Math.floor((new Date()).getTime() / 1000),
       'd': read_duration,
       't': parse_datetime,
+      'uniqid': this.uniqid,
       'strftime': strftime,
       'array_sum': array_sum,
       'array_avg': array_avg,
@@ -189,7 +190,13 @@ function AutomatoScriptingJs(system, caller_context) {
     system._stats_end('scripting_js.script_exec', _s);
     return ret;
   }
-
+  
+  var uniqid_seed = Math.random().toString(16).substr(2, 8);
+  var uniqid_c = 0;
+  
+  this._uniqid = function() {
+    return system.default_node_name + ':' + uniqid_seed + ':' + (++c);
+  }
 }
 
 var scripting_js = new AutomatoScriptingJs(this);
