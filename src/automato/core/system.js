@@ -2063,8 +2063,12 @@ AutomatoSystem = function(caller_context) {
             exec_context = scripting_js.script_exec(init, context, exec_context);
           let payload = scripting_js.script_eval(actiondef['payload'], exec_context, /*to_dict = */true);
           if (payload != null) {
-            if ('topic' in actiondef && actiondef['topic'])
-              topic = scripting_js.script_eval(actiondef['topic'], exec_context, /*to_dict = */true);
+            if ('topic' in actiondef && actiondef['topic']) {
+              if (actiondef['topic'].startsWith('js:') || actiondef['topic'].startsWith('jsf:'))
+                topic = scripting_js.script_eval(actiondef['topic'], exec_context, /*to_dict = */true);
+              else
+                topic = actiondef['topic'];
+            }
             publish = [topic, payload];
             break;
           }
