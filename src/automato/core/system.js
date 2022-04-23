@@ -2069,17 +2069,17 @@ AutomatoSystem = function(caller_context) {
               else
                 topic = actiondef['topic'];
             }
-            publish = [topic, payload];
+            publish = [topic, payload, 'qos' in actiondef ? actiondef['qos'] : 0, 'retain' in actiondef ? actiondef['retain'] : false];
             break;
           }
         } else {
-          publish = [topic, null];
+          publish = [topic, null, 'qos' in actiondef ? actiondef['qos'] : 0, 'retain' in actiondef ? actiondef['retain'] : false];
           break;
         }
       }
 
       if (publish) {
-        entry.publish(publish[0], publish[1]);
+        entry.publish(publish[0], publish[1], publish[2], publish[3]);
         this.event_get_invalidate_on_action(entry, action, exec_context['params'], if_event_not_match);
         return true;
       }
