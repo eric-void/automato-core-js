@@ -2019,6 +2019,10 @@ AutomatoSystem = function(caller_context) {
   this.entry_actions_supported = function(entry) {
     return Object.keys(entry.actions);
   }
+  
+  this.do_action_lambda = function(entry) {
+    return function(actionref, params = {}, if_event_not_match = false, if_event_not_match_keys = false, if_event_not_match_timeout = null) { return do_action(actionref, params, entry, if_event_not_match, if_event_not_match_keys, if_event_not_match_timeout); };
+  }
 
   this.do_action = function(actionref, params = {}, reference_entry_id = null, if_event_not_match = false, if_event_not_match_keys = false, if_event_not_match_timeout = null) {
     let d = this.decode_action_reference(actionref, /*default_entry_id = */reference_entry_id)
@@ -2026,7 +2030,7 @@ AutomatoSystem = function(caller_context) {
   }
 
   this.entry_do_action_lambda = function(entry) {
-    return function(action, params = {}, init = null, if_event_not_match = false, if_event_not_match_keys = false, if_event_not_match_timeout = null) { return entry_do_action(entry, action, params = params, init, if_event_not_match, if_event_not_match_keys, if_event_not_match_timeout); };
+    return function(action, params = {}, init = null, if_event_not_match = false, if_event_not_match_keys = false, if_event_not_match_timeout = null) { return entry_do_action(entry, action, params, init, if_event_not_match, if_event_not_match_keys, if_event_not_match_timeout); };
   }
 
   this.entry_do_action = function(entry_or_id, action, params = {}, init = null, if_event_not_match = false, if_event_not_match_keys = false, if_event_not_match_timeout = null) {
