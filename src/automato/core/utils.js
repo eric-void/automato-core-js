@@ -158,12 +158,12 @@ function round(v, decimals = 0) {
   return Math.round(v * Math.pow(10, decimals)) / Math.pow(10, decimals);
 }
 
-function array_avg(a, decimals = -1) {
+function array_avg(a, decimals = -1, valid_min = null, valid_max = null) {
   let s = 0;
   let c = 0;
   for (i in a)
-    if (i !== null) {
-      s = s + i;
+    if (a[i] !== null && (valid_min === null || a[i] >= valid_min) && (valid_max === null || a[i] <= valid_max)) {
+      s = s + a[i];
       c ++;
     }
   return c > 0 ? round(s / c, decimals) : null;
@@ -173,8 +173,8 @@ function array_sum(a) {
   let s = 0;
   let c = 0;
   for (i in a)
-    if (i !== null) {
-      s = s + i;
+    if (a[i] !== null) {
+      s = s + a[i];
       c ++;
     }
   return c > 0 ? round(s, decimals) : null;
@@ -183,16 +183,16 @@ function array_sum(a) {
 function array_min(a) {
   let s = null;
   for (i in a)
-    if (i !== null && (s === null || i < s))
-      s = i;
+    if (a[i] !== null && (s === null || a[i] < s))
+      s = a[i];
   return s;
 }
 
 function array_max(a) {
   let s = null;
   for (i in a)
-    if (i !== null && (s === null || i > s))
-      s = i;
+    if (a[i] !== null && (s === null || a[i] > s))
+      s = a[i];
   return s;
 }
 
