@@ -42,6 +42,16 @@
     "other@lab": {
       "publish": { "home/light": { "description": "merged", "type": "object" } },
       "events_passthrough": [ { "on": "light@lab.output", "rename": "copied" } ]
+    },
+    "catchall@lab": {
+      "subscribe": { "#": { "handler": "on_all" } }
+    },
+    "history@lab": {
+      "publish": { "history": { "description": "history", "type": "object" } },
+      "subscribe": {
+        "history/get": { "description": "get", "response": ["history"], "publish": ["history"] },
+        "#": { "handler": "on_all" }
+      }
     }
   },
   "steps": [
@@ -76,6 +86,8 @@
     { "call": "entries_publishers_of", "args": ["base/set"], "keys": true },
     { "call": "entries_publishers_of", "args": ["base/other"], "keys": true },
     { "call": "entries_subscribed_to", "args": ["home/light/set"], "keys": true },
+    { "call": "entries_subscribed_to", "args": ["history/get"], "field": "topic" },
+    { "call": "entries_subscribed_to", "args": ["history/other"], "field": "topic" },
     { "entry_call": "entry_is_publisher_of", "entry": "light@lab", "args": ["home/light"] },
     { "entry_call": "entry_is_publisher_of", "entry": "light@lab", "args": ["home/other"] },
     { "entry_call": "entry_is_subscribed_to", "entry": "light@lab", "args": ["home/light/set"] },

@@ -222,6 +222,37 @@ test('a catchall rule with no priority does not publish what the entry is subscr
   same(Object.keys(system.entries_publishers_of('base/other')), ['catch@lab']);
 });
 
+test('with the same priority an exact rule is chosen instead of a wildcard one, whatever the loading order', () => {
+  // "first@lab" puts "#" in the indexes before the rules of "second@lab"
+  let { system } = bootSystem({
+    'first@lab': { 'publish': { '#': { 'type': 'object' } }, 'subscribe': { '#': { 'handler': 'on_all' } } },
+    'second@lab': {
+      'publish': { 'second/state': { 'type': 'object' }, '#': { 'type': 'object' } },
+      'subscribe': { 'second/get': { 'response': ['second/state'], 'publish': ['second/state'] }, '#': { 'handler': 'on_all' } },
+    },
+  });
+  let subs = system.entries_subscribed_to('second/get');
+  same(Object.keys(subs).sort(), ['first@lab', 'second@lab']);
+  same(subs['second@lab']['topic'], 'second/get');
+  same(subs['first@lab']['topic'], '#');
+  same(system.entries_subscribed_to('other/topic')['second@lab']['topic'], '#');
+  let pubs = system.entries_publishers_of('second/state');
+  same(pubs['second@lab']['topic'], 'second/state');
+  same(pubs['first@lab']['topic'], '#');
+  same(system.entries_publishers_of('other/topic')['second@lab']['topic'], '#');
+  // A response is expected only from the chosen (specific) rule
+  assert.strictEqual(system.subscribe_response(system.entry_get('second@lab'), new system.Message(system, 'second/get', '')), true);
+  assert.strictEqual(system.topic_rule_is_exact('a/b[x|y]'), true);
+  assert.strictEqual(system.topic_rule_is_exact('a/+/b'), false);
+  assert.strictEqual(system.topic_rule_is_exact('a/#'), false);
+  assert.strictEqual(system.topic_rule_is_exact('/^a/b$/'), false);
+  // A higher priority still wins over an exact rule, and with the same priority the first rule found is kept if both are exact or both have wildcards
+  assert.strictEqual(system.topic_rule_preferred('a/b', { 'description': 'x' }, '#', { 'handler': 'h' }), false);
+  assert.strictEqual(system.topic_rule_preferred('a/b', { 'handler': 'h' }, '#', { 'handler': 'h' }), true);
+  assert.strictEqual(system.topic_rule_preferred('#', { 'handler': 'h' }, 'a/b', { 'handler': 'h' }), false);
+  assert.strictEqual(system.topic_rule_preferred('a/+', { 'handler': 'h' }, '#', { 'handler': 'h' }), false);
+});
+
 test('regexp topic rules are anchored at start, like re.match in python', () => {
   let { system } = bootSystem({
     'rx@lab': { 'publish': { '/sensor/([0-9]+)/': { 'type': 'object' } } },

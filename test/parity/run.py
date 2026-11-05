@@ -63,6 +63,8 @@ def run(scenario):
       ret = {k: ret[k] if k in ret else None for k in step['pick']}
     if 'keys' in step:
       ret = list(ret.keys())
+    if 'field' in step:
+      ret = {k: ret[k][step['field']] for k in ret}
     if 'sort' in step:
       ret = sorted(ret)
     if 'time' in step:

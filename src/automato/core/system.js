@@ -926,6 +926,24 @@ AutomatoSystem = function(caller_context) {
     return 0;
   }
 
+  this.topic_rule_is_exact = function(rule) {
+    /*
+    Return true if the topic part of the rule has no wildcards ("#", "+") and is not a regexp (the payload filter part is not considered)
+    */
+    let m = this._re_topic_matches.exec(rule);
+    return m && m.groups['topic_simple'] && !m.groups['topic_simple'].includes('#') && !m.groups['topic_simple'].includes('+') ? true : false;
+  }
+
+  this.topic_rule_preferred = function(rule, definition, other_rule, other_definition) {
+    /*
+    When two topic rules of the same entry match the same topic, return true if "rule" should be chosen instead of "other_rule" (the one chosen so far).
+    The rule with the higher topic_match_priority wins. With the same priority, an exact rule wins over a rule with wildcards or a regexp. Otherwise the rule chosen so far is kept.
+    */
+    let priority = this.topic_match_priority(definition);
+    let other_priority = this.topic_match_priority(other_definition);
+    return priority > other_priority || (priority == other_priority && this.topic_rule_is_exact(rule) && !this.topic_rule_is_exact(other_rule));
+  }
+
   this.topic_cache_reset = function() {
     this.index_topic_cache = { 'hits': 0, 'miss': 0, 'data': { } };
   }
@@ -1084,7 +1102,7 @@ AutomatoSystem = function(caller_context) {
           if (entry) {
             let tmp = this.topic_match_priority(entry.definition['publish'][t[0]]);
             if (tmp > 0 || !this.entry_is_subscribed_to(entry, topic, payload)) {
-              if (entry_id in res && tmp > this.topic_match_priority(res[entry_id]['definition']))
+              if (entry_id in res && this.topic_rule_preferred(t[0], entry.definition['publish'][t[0]], res[entry_id]['topic'], res[entry_id]['definition']))
                 delete res[entry_id];
               if (!(entry_id in res))
                 res[entry_id] = {
@@ -1130,7 +1148,7 @@ AutomatoSystem = function(caller_context) {
         for (let entry_id of t[1]['entries']) {
           let entry = this.entry_get(entry_id);
           if (entry) {
-            if (entry_id in res && this.topic_match_priority(entry.definition['subscribe'][t[0]]) > this.topic_match_priority(res[entry_id]['definition']))
+            if (entry_id in res && this.topic_rule_preferred(t[0], entry.definition['subscribe'][t[0]], res[entry_id]['topic'], res[entry_id]['definition']))
               delete res[entry_id];
             if (!(entry_id in res))
               res[entry_id] = {

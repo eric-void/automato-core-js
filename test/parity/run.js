@@ -57,6 +57,8 @@ function runJs(scenario) {
       ret = Object.fromEntries(step['pick'].map(k => [k, k in ret ? ret[k] : null]));
     if ('keys' in step)
       ret = Object.keys(ret);
+    if ('field' in step)
+      ret = Object.fromEntries(Object.keys(ret).map(k => [k, ret[k][step['field']]]));
     if ('sort' in step)
       ret = ret.slice().sort();
     if ('time' in step)
