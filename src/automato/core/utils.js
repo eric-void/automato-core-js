@@ -36,7 +36,7 @@ function read_duration(v) {
     v = parseInt(v);
     return !Number.isNaN(v) ? v : -1;
   }
-  u = v.slice(-1).toUpperCase();
+  let u = v.slice(-1).toUpperCase();
   v = v.slice(0, -1);
   if (v === "")
     return -1;
@@ -119,7 +119,7 @@ function nan_remove(v) {
     for (let k in v)
       v[k] = nan_remove(v[k]);
   }
-  else if (isNaN(v))
+  else if (typeof v == 'number' && isNaN(v))
     v = null;
   return v
 }
@@ -161,7 +161,7 @@ function round(v, decimals = 0) {
 function array_avg(a, decimals = -1, valid_min = null, valid_max = null) {
   let s = 0;
   let c = 0;
-  for (i in a)
+  for (let i in a)
     if (a[i] !== null && (valid_min === null || a[i] >= valid_min) && (valid_max === null || a[i] <= valid_max)) {
       s = s + a[i];
       c ++;
@@ -169,10 +169,10 @@ function array_avg(a, decimals = -1, valid_min = null, valid_max = null) {
   return c > 0 ? round(s / c, decimals) : null;
 }
 
-function array_sum(a) {
+function array_sum(a, decimals = -1) {
   let s = 0;
   let c = 0;
-  for (i in a)
+  for (let i in a)
     if (a[i] !== null) {
       s = s + a[i];
       c ++;
@@ -182,7 +182,7 @@ function array_sum(a) {
 
 function array_min(a) {
   let s = null;
-  for (i in a)
+  for (let i in a)
     if (a[i] !== null && (s === null || a[i] < s))
       s = a[i];
   return s;
@@ -190,7 +190,7 @@ function array_min(a) {
 
 function array_max(a) {
   let s = null;
-  for (i in a)
+  for (let i in a)
     if (a[i] !== null && (s === null || a[i] > s))
       s = a[i];
   return s;
@@ -268,7 +268,7 @@ function deepcopy(v, max_depth = 2) {
   // Create an array or object to hold the values
   let res = Array.isArray(v) ? [] : {}
 
-  for (k in v)
+  for (let k in v)
     res[k] = deepcopy(v[k], max_depth - 1);
 
   return res;
@@ -278,7 +278,7 @@ function isinstance(v, t) {
   if (v === null)
     return false;
   if (Array.isArray(t)) {
-    for (_t of t)
+    for (let _t of t)
       if (isinstance(v, _t))
         return true;
     return false;
@@ -301,6 +301,8 @@ function isinstance(v, t) {
 }
 
 function len(v) {
+  if (v === null)
+    return 0;
   if (typeof v == "object" && Array.isArray(v))
     return v.length;
   if (typeof v == "object" && v.constructor == Object)

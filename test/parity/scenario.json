@@ -1,0 +1,129 @@
+{
+  "definitions": {
+    "light@lab": {
+      "type": "item",
+      "caption": "Light",
+      "publish": {
+        "home/light": {
+          "type": "object",
+          "notify": "Light is {payload[state]}",
+          "events": {
+            "output": "js:({ value: payload['state'], timer_to: 'timer' in payload ? payload['timer'] : 0, label: 'L' + payload['state'] })"
+          }
+        }
+      },
+      "subscribe": {
+        "home/light/set": {
+          "response": ["home/light"],
+          "actions": {
+            "output-set": { "payload": "js:({ state: params['value'] })", "qos": 1, "retain": true }
+          }
+        },
+        "home/light/get": {
+          "response": ["home/light"],
+          "actions": { "output-get": { "payload": "" } }
+        }
+      }
+    },
+    "sensor@lab": {
+      "type": "device",
+      "publish": {
+        "/^home/sensor/([0-9]+)$/": {
+          "type": "object",
+          "events": { "temperature": "js:({ port: matches[1], value: payload['t'], unit: 'C' })" }
+        },
+        "home/status": { "description": "status", "type": "string", "events": { "status": "js:({ value: payload })" } },
+        "base/#": {}
+      },
+      "subscribe": {
+        "base/set": { "description": "set" }
+      }
+    },
+    "other@lab": {
+      "publish": { "home/light": { "description": "merged", "type": "object" } },
+      "events_passthrough": [ { "on": "light@lab.output", "rename": "copied" } ]
+    }
+  },
+  "steps": [
+    { "call": "topic_matches", "args": ["a/+/c", "a/b/c"], "pick": ["matched", "topic_matches"] },
+    { "call": "topic_matches", "args": ["a/#", "a"], "pick": ["matched", "topic_matches"] },
+    { "call": "topic_matches", "args": ["a/b[x|y]", "a/b", "y"], "pick": ["matched", "use_payload"] },
+    { "call": "topic_matches", "args": ["a/b[x|y]", "a/b", "z"], "pick": ["matched", "use_payload"] },
+    { "call": "topic_matches", "args": ["/b/", "a/b"], "pick": ["matched", "topic_matches"] },
+    { "call": "topic_matches", "args": ["/a/(b)/", "a/b/c"], "pick": ["matched", "topic_matches"] },
+    { "call": "topic_matches", "args": ["a/b[js:payload['v'] == 1]", "a/b", {"v": 1}], "pick": ["matched", "use_payload"] },
+    { "call": "decode_event_reference", "args": ["a@b.ev(params['x'] == 1)"] },
+    { "call": "decode_event_reference", "args": ["a@b"] },
+    { "call": "decode_event_reference", "args": ["a@b", null, null, true] },
+    { "call": "decode_event_reference", "args": [".ev", "def@n"] },
+    { "call": "decode_action_reference", "args": ["a@b.ac(params['x'] = 1)"] },
+    { "call": "decode_action_reference", "args": ["a@b"] },
+    { "call": "transform_action_reference_to_event_reference", "args": ["a@b.x-set(js: params['x'] = 1; params['y'] = 2;)"] },
+    { "call": "transform_action_reference_to_event_reference", "args": ["a@b.x-set", true] },
+    { "call": "transform_event_reference_to_action_reference", "args": ["a@b.x(js: params['x'] == 1 && params['y'] == 2)"] },
+    { "call": "transform_event_reference_to_action_reference", "args": ["a@b", true] },
+    { "call": "transform_action_name_to_event_name", "args": ["output-set"] },
+    { "call": "generate_event_reference", "args": ["a@b", "ev", { "keys": { "port": "1" } }] },
+    { "call": "entry_id_match", "args": ["a@b", "a"] },
+    { "call": "entry_id_find", "args": ["light"] },
+    { "call": "entry_id_find", "args": ["nothing"] },
+    { "call": "topic_published_definition", "args": ["home/light", null, true], "pick": ["description", "type"] },
+    { "call": "topic_published_definition", "args": ["no/match"] },
+    { "call": "topic_subscription_definition", "args": ["no/match"] },
+    { "call": "topic_subscription_is_internal", "args": ["base/set"] },
+    { "call": "topic_subscription_list", "args": [], "sort": true },
+    { "call": "entries_publishers_of", "args": ["home/light"], "keys": true, "sort": true },
+    { "call": "entries_publishers_of", "args": ["base/set"], "keys": true },
+    { "call": "entries_publishers_of", "args": ["base/other"], "keys": true },
+    { "call": "entries_subscribed_to", "args": ["home/light/set"], "keys": true },
+    { "entry_call": "entry_is_publisher_of", "entry": "light@lab", "args": ["home/light"] },
+    { "entry_call": "entry_is_publisher_of", "entry": "light@lab", "args": ["home/other"] },
+    { "entry_call": "entry_is_subscribed_to", "entry": "light@lab", "args": ["home/light/set"] },
+    { "entry_call": "entry_support_event", "entry": "light@lab", "args": ["output"] },
+    { "entry_call": "entry_support_action", "entry": "light@lab", "args": ["output-get"] },
+    { "entry_call": "entry_events_supported", "entry": "light@lab", "args": [], "sort": true },
+    { "entry_call": "entry_actions_supported", "entry": "light@lab", "args": [], "sort": true },
+    { "call": "event_get", "args": ["light@lab.output"] },
+    { "message": "home/light", "payload": "{\"state\": 1, \"timer\": 30}" },
+    { "call": "event_get", "args": ["light@lab.output"] },
+    { "call": "event_get", "args": ["light@lab.output(params['value'] == 1)"] },
+    { "call": "event_get", "args": ["light@lab.output(params['value'] == 2)"] },
+    { "call": "event_get", "args": ["light@lab.output", null, ["value"]] },
+    { "call": "event_get", "args": ["light@lab.output", null, ["label"]] },
+    { "call": "event_get", "args": ["light@lab.output", null, ["nokey"]] },
+    { "call": "event_get", "args": ["light@lab.output", null, ["value", "nokey", "label"]] },
+    { "call": "event_get", "args": ["light@lab.nothing", null, ["a", "b"]] },
+    { "call": "event_get", "args": ["other@lab.copied"] },
+    { "call": "event_get_time", "args": ["light@lab.output"], "time": true },
+    { "entry_call": "entry_event_get_time", "entry": "light@lab", "args": ["output"], "time": true },
+    { "entry_call": "entry_event_get", "entry": "light@lab", "args": ["output", null, ["value", "_time"]], "time_at": 1 },
+    { "message": "home/sensor/1", "payload": "{\"t\": 20}" },
+    { "message": "home/sensor/2", "payload": "{\"t\": 30}" },
+    { "message": "home/sensor/1", "payload": "{\"t\": 21}" },
+    { "message": "home/status", "payload": "online" },
+    { "call": "event_get", "args": ["sensor@lab.temperature(params['port'] == '1')"] },
+    { "call": "event_get", "args": ["sensor@lab.temperature(params['port'] == '2')", null, ["value"]] },
+    { "call": "event_get", "args": ["sensor@lab.status"] },
+    { "entry_call": "entry_events_published", "entry": "sensor@lab", "args": [], "strip_time": true },
+    { "call": "do_action", "args": ["light@lab.output-get"] },
+    { "call": "do_action", "args": ["light@lab.output-set", { "value": 1 }, null, "light@lab.output"] },
+    { "call": "do_action", "args": ["light@lab.unknown"] },
+    { "published": true },
+    { "call": "do_action", "args": ["light@lab.output-set", { "value": 2 }, null, "light@lab.output"] },
+    { "published": true },
+    { "call": "event_get", "args": ["light@lab.output"] },
+    { "call": "do_action", "args": ["light@lab.output-set(params['value'] = 5)", {}] },
+    { "published": true },
+    { "entry_method": "do", "entry": "light@lab", "args": ["output-set", { "value": 6 }] },
+    { "published": true },
+    { "do_action_lambda": "light@lab", "args": [".output-set", { "value": 7 }] },
+    { "published": true },
+    { "entry_method": "publish", "entry": "light@lab", "args": ["home/light/set", { "state": 8 }] },
+    { "published": true },
+    { "call": "entry_reload", "args": ["sensor@lab"] },
+    { "entry_exists": "sensor@lab" },
+    { "call": "entry_unload", "args": ["sensor@lab"] },
+    { "entry_exists": "sensor@lab" },
+    { "call": "entries_publishers_of", "args": ["home/status"], "keys": true }
+  ]
+}

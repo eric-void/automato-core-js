@@ -26,10 +26,10 @@ function AutomatoNotifications(system, scripting_js) {
   this.entry_normalize = function(entry) {
     for (let k of ['notify', 'notify_level', 'notify_handler', 'notify_change_level', 'notify_change_duration']) {
       if (k in entry.definition) {
-        for (topic in entry.definition['publish'])
+        for (let topic in entry.definition['publish'])
           if (!(k in entry.definition['publish'][topic]))
             entry.definition['publish'][topic][k] = entry.definition[k];
-        for (topic in entry.definition['subscribe'])
+        for (let topic in entry.definition['subscribe'])
           if (!(k in entry.definition['subscribe'][topic]))
             entry.definition['subscribe'][topic][k] = entry.definition[k];
       }
@@ -54,23 +54,23 @@ function AutomatoNotifications(system, scripting_js) {
     let defaults = {};
     
     if ('notify_if' in ldef)
-      for (expr in ldef['notify_if']) {
+      for (let expr in ldef['notify_if']) {
         let v = scripting_js.script_eval(expr, {"topic": topic, "payload": payload, "matches": matches}, false, true);
         if (v) {
-          for (k in ldef['notify_if'][expr])
+          for (let k in ldef['notify_if'][expr])
             defaults[k] = ldef['notify_if'][expr][k];
           if ('notify_next_level' in ldef['notify_if'][expr])
             set_notifications_topic_next_level = ldef['notify_if'][expr]['notify_next_level'];
         }
       }
-    for (k of ['notify', 'notify_level', 'notify_handler', 'notify_change_level', 'notify_change_duration', 'payload'])
+    for (let k of ['notify', 'notify_level', 'notify_handler', 'notify_change_level', 'notify_change_duration', 'payload'])
       if (k in ldef && !(k in defaults))
         defaults[k] = ldef[k];
     
     let string = null;
     if (!string && 'notify_handler' in defaults)
       string = scripting_js.script_eval(defaults['notify_handler'], {"topic": topic, "payload": payload, "matches": matches}, false, true);
-    else if (!string && 'notify' in defaults && defaults['notify'])
+    else if (!string && 'notify' in defaults && defaults['notify'] && isinstance(defaults['notify'], 'str'))
       string = this.notification_parse_string(defaults['notify'], { 'payload': payload, 'matches': matches, 'caption': entry.caption}, 'payload', defaults);
     
     if (string) {
@@ -102,13 +102,13 @@ function AutomatoNotifications(system, scripting_js) {
       let _m = key.match(/^([^\[]+)\[([^\]]*)?\](.*)$/);
       if (_m) {
         if (_m[1] == '_' && _var) {
-          _ctx = {}
+          let _ctx = {}
           _ctx[_var] = context[_var]
           return this._notification_parse_var(_m[2] + _m[3], _ctx, null, definition);
         }
         if (context_array) {
           _m[1] = parseInt(_m[1]);
-          if (Number.isNan(_m[1]))
+          if (Number.isNaN(_m[1]))
             return null;
         }
         if (_m[1] in context)
@@ -135,7 +135,7 @@ function AutomatoNotifications(system, scripting_js) {
         if (parseInt(res) in definition['payload'][key] && 'caption' in definition['payload'][key][parseInt(res)])
           res = definition['payload'][key][parseInt(res)]['caption'];
       } else if (_f.startsWith("strftime")) {
-        format = _f.length > 10 ? _f.slice(9, -1) : "%Y-%m-%d %H:%M:%S";
+        let format = _f.length > 10 ? _f.slice(9, -1) : "%Y-%m-%d %H:%M:%S";
         let v = parseInt(res);
         if (!Number.isNaN(v))
           res = strftime(format, new Date(v < 9999999999 ? v * 1000 : v));

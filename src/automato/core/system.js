@@ -132,7 +132,7 @@ AutomatoSystem = function(caller_context) {
    *  handler can return a list of ids of entries (already loaded and initialized) that must be unloaded and reloaded
    */
   this.on_entry_load_batch = function(handler) {
-    this.on_entry_load_batch.push(handler);
+    this.handler_on_entry_load_batch.push(handler);
   }
 
   this.on_entry_unload = function(handler) {
@@ -152,7 +152,7 @@ AutomatoSystem = function(caller_context) {
    * @param handler(entries: {entry_id: entry})
    */
   this.on_entry_init_batch = function(handler) {
-    this.on_entry_init_batch.push(handler);
+    this.handler_on_entry_init_batch.push(handler);
   }
 
   /**
@@ -188,7 +188,7 @@ AutomatoSystem = function(caller_context) {
     
     notifications.init();
     
-    this.entry_load(this.config['entries'], /* node_name = */ this.default_node_name, /*id_from_definition = */true, /*generate_new_entry_id_on_conflict = */ true);
+    this.entry_load(this.config['entries'], /* node_name = */ this.default_node_name, /*unload_other_from_node = */false, /*id_from_definition = */true, /*generate_new_entry_id_on_conflict = */ true);
 
     if (this.handler_on_initialized)
       for (let h of this.handler_on_initialized.values())
@@ -379,7 +379,7 @@ AutomatoSystem = function(caller_context) {
   
   @param id_from_definition. If True: definitions = [ { ...definition...} ]; if False: definitions = { 'entry_id': { ... definition ... } }
   */
-  this.entry_load = function(definitions, node_name = false, unload_other_from_node = false, id_from_definition = false, generate_new_entry_id_on_conflict = false) {
+  this.entry_load = function(definitions, node_name = false, unload_other_from_node = false, id_from_definition = false, generate_new_entry_id_on_conflict = false, call_on_entries_change = true) {
     if (!node_name)
       node_name = this.default_node_name;
     
@@ -412,10 +412,10 @@ AutomatoSystem = function(caller_context) {
             let reload_entries = h(loading_defs);
             if (reload_entries) {
               console.debug("SYSTEM> Loading entries, need to reload other entries {entries} ...".format({entries: reload_entries}));
-              for (let rentry_id in reload_entries)
+              for (let rentry_id of reload_entries)
                 if (!(rentry_id in reload_definitions) && rentry_id in this.all_entries) {
                   reload_definitions[rentry_id] = this.all_entries[rentry_id].definition_loaded;
-                  this.entry_unload(rentry_id, False);
+                  this.entry_unload(rentry_id, false);
                   unloaded.push(rentry_id);
                 }
             }
@@ -438,12 +438,12 @@ AutomatoSystem = function(caller_context) {
         if (this.all_entries[entry_id].node_name == node_name && !(entry_id in loaded_defs) && !skipped_ids.includes(entry_id))
           todo_unload.push(entry_id);
       for (let entry_id of todo_unload) {
-        this.entry_unload(entry_id);
+        this.entry_unload(entry_id, false);
         unloaded.push(entry_id);
       }
     }
     
-    if (loaded_defs) {
+    if (len(loaded_defs)) {
       // Final loading phase, install final features. This must be done BEFORE init hooks (they must receive a fully loaded entry)
       for (let entry_id in loaded_defs) {
         this._entry_definition_normalize_after_load(loaded_defs[entry_id]);
@@ -467,8 +467,8 @@ AutomatoSystem = function(caller_context) {
       console.debug("SYSTEM> Loaded entries {entries}.".format({entries: Object.keys(loaded_defs)}));
     }
     
-    if (this.handler_on_entries_change)
-      for (let h in this.handler_on_entries_change)
+    if (call_on_entries_change && this.handler_on_entries_change)
+      for (let h of this.handler_on_entries_change)
         h(Object.keys(loaded_defs), unloaded);
   }
   
@@ -482,7 +482,7 @@ AutomatoSystem = function(caller_context) {
     }
     
     if (!entry_id)
-      entry_id = 'id' in definition ? definition['id'] : ('item' in definition ? definition['item'] : ('module' in definition ? definition['module'] : ('device' in definition ? definition['device'] : (''))));
+      entry_id = 'id' in definition ? definition['id'] : ('module' in definition ? definition['module'] : ('device' in definition ? definition['device'] : ('item' in definition ? definition['item'] : (''))));
     if (!entry_id)
       return !extended_result ? null : { "entry": null, "id": entry_id, "message": "error_no_id" };
     entry_id = entry_id.replace(/[^A-Za-z0-9@_-]+/g, '-');
@@ -492,8 +492,8 @@ AutomatoSystem = function(caller_context) {
     
     if (generate_new_entry_id_on_conflict && entry_id in this.all_entries) {
       d = entry_id.indexOf("@");
-      entry_local_id = entry_id.slice(0, d);
-      entry_node_name = entry_id.slice(d + 1);
+      let entry_local_id = entry_id.slice(0, d);
+      let entry_node_name = entry_id.slice(d + 1);
       entry_id = entry_local_id;
       let i = 0;
       while (entry_id + '@' + entry_node_name in this.all_entries)
@@ -528,7 +528,7 @@ AutomatoSystem = function(caller_context) {
   this.entry_unload = function(entry_ids, call_on_entries_change = true) {
     if (typeof entry_ids == "string")
       entry_ids = [ entry_ids ];
-    for (entry_id in entry_ids)
+    for (let entry_id of entry_ids)
       if (entry_id in this.all_entries) {
         console.debug("SYSTEM> Unloading entry {id} ...".format({id: entry_id}));
         if (this.handler_on_entry_unload)
@@ -548,22 +548,22 @@ AutomatoSystem = function(caller_context) {
     this.topic_cache_reset();
 
     if (call_on_entries_change && this.handler_on_entries_change)
-      for (let h in this.handler_on_entries_change)
+      for (let h of this.handler_on_entries_change)
         h([], entry_ids);
   }
   
-  this.entry_reload = function(entry_id, call_on_entries_change = true) {
+  this.entry_reload = function(entry_ids, call_on_entries_change = true) {
     if (typeof entry_ids == "string")
       entry_ids = [ entry_ids ];
-    for (entry_id in entry_ids)
+    for (let entry_id of entry_ids)
       if (entry_id in this.all_entries) {
         let definition = this.all_entries[entry_id].definition_loaded;
         this.entry_unload(entry_id, false);
-        this.entry_load(definition, false, entry_id, false, false);
+        this.entry_load({ [entry_id]: definition }, false, false, false, false, false);
       }
 
     if (call_on_entries_change && this.handler_on_entries_change)
-      for (let h in this.handler_on_entries_change)
+      for (let h of this.handler_on_entries_change)
         h(entry_ids, entry_ids);
   }
   
@@ -573,10 +573,10 @@ AutomatoSystem = function(caller_context) {
       if (this.all_entries[entry_id].node_name == node_name)
         todo_unload.push(entry_id);
     for (let entry_id of todo_unload)
-      this.entry_unload(entry_id);
+      this.entry_unload(entry_id, false);
     
     if (this.handler_on_entries_change)
-      for (let h in this.handler_on_entries_change)
+      for (let h of this.handler_on_entries_change)
         h([], todo_unload);
   }
 
@@ -646,7 +646,8 @@ AutomatoSystem = function(caller_context) {
       for (let topic_rule in entry.definition['subscribe']) {
         if ('response' in entry.definition['subscribe'][topic_rule]) {
           res = [];
-          for (let t in entry.definition['subscribe'][topic_rule]['response']) {
+          let response = entry.definition['subscribe'][topic_rule]['response'];
+          for (let t of isinstance(response, 'dict') ? Object.keys(response) : response) {
             if (!isinstance(t, 'dict'))
               t = { 'topic': t };
             if ('topic' in t && t['topic'] != 'NOTIFY')
@@ -729,7 +730,7 @@ AutomatoSystem = function(caller_context) {
   this._entry_add_to_index_topic_published = function(entry, topic, definition) {
     if (!(topic in this.index_topic_published))
       this.index_topic_published[topic] = { 'definition': {}, 'entries': []};
-    else if (topic in this.index_topic_published[topic]['entries'])
+    else if (this.index_topic_published[topic]['entries'].includes(entry.id))
       this._entry_remove_from_index_topic_published(entry, topic, /*rebuild_definition = */false);
     this.index_topic_published[topic]['definition'] = this._entry_index_definition_build(this.index_topic_published[topic]['entries'], 'publish', topic, /*add_definition = */definition);
     this.index_topic_published[topic]['entries'].push(entry.id);
@@ -746,7 +747,7 @@ AutomatoSystem = function(caller_context) {
   this._entry_add_to_index_topic_subscribed = function(entry, topic, definition) {
     if (!(topic in this.index_topic_subscribed))
       this.index_topic_subscribed[topic] = { 'definition': {}, 'entries': []};
-    else if (topic in this.index_topic_subscribed[topic]['entries'])
+    else if (this.index_topic_subscribed[topic]['entries'].includes(entry.id))
       this._entry_remove_from_index_topic_subscribed(entry, topic, /*rebuild_definition = */false);
     this.index_topic_subscribed[topic]['definition'] = this._entry_index_definition_build(this.index_topic_subscribed[topic]['entries'], 'subscribe', topic, /*add_definition = */definition);
     this.index_topic_subscribed[topic]['entries'].push(entry.id);
@@ -763,7 +764,7 @@ AutomatoSystem = function(caller_context) {
   this._entry_index_definition_build = function(entry_ids, mtype, topic, add_definition = null) {
     let definitions = [];
     for (let entry_id in entry_ids) {
-      entry = this.entry_get(entry_ids[entry_id]);
+      let entry = this.entry_get(entry_ids[entry_id]);
       definitions.push(entry.definition_exportable[mtype][topic]);
     }
     if (add_definition)
@@ -773,7 +774,7 @@ AutomatoSystem = function(caller_context) {
 
   this._entry_index_definition_build_merge = function(definitions, merge_config) {
     let res = {};
-    for (let definition in definitions)
+    for (let definition of definitions)
       for (let prop in definition)
         if (!(prop in merge_config) || merge_config[prop]) {
           if (!(prop in res))
@@ -781,7 +782,7 @@ AutomatoSystem = function(caller_context) {
           else if (isinstance(res[prop], ['int', 'str', 'bool', 'float']) && isinstance(definition[prop], ['int', 'str', 'bool', 'float']))
             res[prop] = '' + res[prop] + ', ' + definition[prop];
           else if (isinstance(res[prop], 'list') && isinstance(definition[prop], 'list'))
-            res[prop] = res[prop] + definition[prop];
+            res[prop] = res[prop].concat(definition[prop]);
           else
             res[prop] = null;
         }
@@ -832,7 +833,7 @@ AutomatoSystem = function(caller_context) {
     return entry_id in this.all_entries && (!local || this.all_entries[entry_id].is_local) ? this.all_entries[entry_id] : null;
     */
     let id = this.entry_id_find(entry_id);
-    return id ? this.all_entries[id] : null;
+    return id && id in this.all_entries ? this.all_entries[id] : null;
   }
 
   this.entries_definition_exportable = function() {
@@ -877,14 +878,14 @@ AutomatoSystem = function(caller_context) {
         try {
           // TODO put a limit on _re_topic_matches_cache
           if (!(m['topic_regex'] in this._re_topic_matches_cache))
-            this._re_topic_matches_cache[m['topic_regex']] = new RegExp(m['topic_regex']);
+            this._re_topic_matches_cache[m['topic_regex']] = new RegExp('^(?:' + m['topic_regex'] + ')'); // Anchored: same behaviour of re.match in python
           let mm = this._re_topic_matches_cache[m['topic_regex']].exec(topic);
           result['topic_matches'] = mm ? mm.slice() : [];
         } catch (exception) {
           console.error("SYSTEM> Regexp error in message rule: {rule}".format({rule: rule}), exception);
         }
       }
-      if (result['topic_matches'].length) {
+      if (result['topic_matches'] && result['topic_matches'].length) {
         result['use_payload'] = false;
         result['matched'] = true;
         if (payload != null) {
@@ -999,7 +1000,7 @@ AutomatoSystem = function(caller_context) {
         return this.index_topic_published[topic]['definition'];
     } else {
       let ret = this.topic_cache_find(this.index_topic_published, 'published', topic, payload);
-      if (ret) {
+      if (ret.length) {
         for (let t in ret)
           if (!this.topic_published_definition_is_internal(ret[t][1]['definition']))
             return ret[t][1]['definition'];
@@ -1010,7 +1011,7 @@ AutomatoSystem = function(caller_context) {
   }
 
   this.topic_subscription_list = function() {
-    return list(this.index_topic_subscribed.keys());
+    return Object.keys(this.index_topic_subscribed);
   }
 
   this.topic_subscription_definition_is_internal = function(definition) {
@@ -1027,12 +1028,12 @@ AutomatoSystem = function(caller_context) {
     Return subscription definition, if present, of a subscribed topic
     If multiple subscriptions are found, first not internal is returned, if present (use "entries_subscribed_to" if you want them all)
     */
-    if (strict_match)
+    if (strict_match) {
       if (topic in this.index_topic_subscribed)
         return this.index_topic_subscribed[topic]['definition'];
-    else {
+    } else {
       let ret = this.topic_cache_find(this.index_topic_subscribed, 'subscribed', topic, payload);
-      if (ret) {
+      if (ret.length) {
         for (let t in ret)
           if (!this.topic_subscription_definition_is_internal(ret[t][1]['definition']))
             return ret[t][1]['definition'];
@@ -1164,7 +1165,7 @@ AutomatoSystem = function(caller_context) {
   }
 
   this.entry_is_publisher_of = function(entry, topic, payload = null) {
-    return this.entry_topic_published_definition(entry, topic, false, true) ? true : false;
+    return len(this.entry_topic_published_definition(entry, topic, payload, false, true)) > 0;
   }
 
   this.entry_topic_subscription_definition = function(entry, topic, payload = null, strict_match = false, skip_topic_match_priority = false) {
@@ -1185,7 +1186,7 @@ AutomatoSystem = function(caller_context) {
   }
 
   this.entry_is_subscribed_to = function(entry, topic, payload = null) {
-    return this.entry_topic_subscription_definition(entry, topic, false, true) ? true : false;
+    return len(this.entry_topic_subscription_definition(entry, topic, payload, false, true)) > 0;
   }
 
 
@@ -1198,6 +1199,11 @@ AutomatoSystem = function(caller_context) {
    ***************************************************************************************************************************************************************/
   
   this.message_counter = 0;
+
+  // JS only: python can do "matches != [True]" directly (a simple topic rule returns [true], with no regexp groups)
+  this._topic_matches_for_message = function(matches) {
+    return matches.length == 1 && matches[0] === true ? [] : matches;
+  }
 
   this.Message = function(system, topic, payload, qos = null, retain = null, payload_source = null, received = 0, copy_id = -1) {
     if (copy_id == -1)
@@ -1237,11 +1243,11 @@ AutomatoSystem = function(caller_context) {
               ignore_interval = entries[entry_id]['entry'].definition["ignore_interval"];
             if ("ignore_interval" in entries[entry_id]['definition'])
               ignore_interval = entries[entry_id]['definition']["ignore_interval"];
-            if (ignore_interval > 0 && this.topic in entries[entry_id]['entry'].publish_last_seen && (timems() / 1000) - entries[entry_id]['entry'].publish_last_seen[this.topic] < ignore_interval * 0.99)
+            if (ignore_interval > 0 && this.topic in entries[entry_id]['entry'].publish_last_seen && (system.timems() / 1000) - entries[entry_id]['entry'].publish_last_seen[this.topic] < ignore_interval - 1)
               ignored = true
           }
           if (!ignored)
-            this._publishedMessages.push(new system.PublishedMessage(system, this, entries[entry_id]['entry'], entries[entry_id]['topic'], entries[entry_id]['definition'], entries[entry_id]['matches'] != [true] ? entries[entry_id]['matches'] : []));
+            this._publishedMessages.push(new system.PublishedMessage(system, this, entries[entry_id]['entry'], entries[entry_id]['topic'], entries[entry_id]['definition'], system._topic_matches_for_message(entries[entry_id]['matches'])));
           //else
           //  logging.debug("SYSTEM> Ignored publishedmessage {entry_id}.{topic_rule} ({topic})".format({entry_id: entry_id, topic_rule: entries[entry_id]['topic'], topic: self.topic}));
         }
@@ -1279,7 +1285,7 @@ AutomatoSystem = function(caller_context) {
         _s = system._stats_start();
         this._subscribedMessages = [];
         for (let entry_id in entries)
-          this._subscribedMessages.push(new system.SubscribedMessage(system, this, entries[entry_id]['entry'], entries[entry_id]['topic'], entries[entry_id]['definition'], entries[entry_id]['matches'] != [true] ? entries[entry_id]['matches'] : []));
+          this._subscribedMessages.push(new system.SubscribedMessage(system, this, entries[entry_id]['entry'], entries[entry_id]['topic'], entries[entry_id]['definition'], system._topic_matches_for_message(entries[entry_id]['matches'])));
         system._stats_end('Message.subscribedMessages().create', _s);
         system._stats_end('Message(' + this.topic + ').subscribedMessages().create', _s);
       }
@@ -1384,7 +1390,7 @@ AutomatoSystem = function(caller_context) {
     this.internal = system.topic_subscription_definition_is_internal(this.definition);
 
     this.copy = function() {
-      return SubscribedMessage(system, this.message, this.entry, this.topic_rule, this.definition, this.matches, /*do_copy = */true);
+      return new system.SubscribedMessage(system, this.message, this.entry, this.topic_rule, this.definition, this.matches, /*do_copy = */true);
     }
   }
 
@@ -1415,7 +1421,7 @@ AutomatoSystem = function(caller_context) {
     }
     
     // manage responses callbacks
-    _s = this._stats_start();
+    let _s = this._stats_start();
     this._subscribed_response_on_message(m);
     this._stats_end('on_mqtt_message.subscribed_response', _s);
     this._stats_end('on_mqtt_message(' + topic + ').subscribed_response', _s);
@@ -1449,7 +1455,9 @@ AutomatoSystem = function(caller_context) {
   }
   
   this.entry_event_keys_index = function(key_values, temporary = false) {
-    return (temporary ? "T:" : "") + json_sorted_encode(key_values);
+    // Same format of json.dumps in python: an event imported from a node must have the same index of the one generated here
+    let sorted = sort_map(key_values);
+    return (temporary ? "T:" : "") + "{" + Object.keys(sorted).map(function(k) { return JSON.stringify(k) + ": " + JSON.stringify(sorted[k]); }).join(", ") + "}";
   }
   
   this.entry_event_keys_index_is_temporary = function(keys_index) {
@@ -1478,7 +1486,7 @@ AutomatoSystem = function(caller_context) {
   this._entry_event_publish_internal = function(entry, eventname, params, time, data, event_keys, keys_index) {
     // If this is a new keys_index, i must merge data with empty keys_index (if present)
     if (keys_index != '{}' && eventname in this.events_published && entry.id in this.events_published[eventname] && '{}' in this.events_published[eventname][entry.id] && !(keys_index in this.events_published[eventname][entry.id]))
-      for (k in this.events_published[eventname][entry.id]['{}']['params'])
+      for (let k in this.events_published[eventname][entry.id]['{}']['params'])
         if (!(k in params))
           params[k] = this.events_published[eventname][entry.id]['{}']['params'][k];
     
@@ -1504,14 +1512,14 @@ AutomatoSystem = function(caller_context) {
     // Extract changed params (from previous event detected)
     if (eventname in this.events_published && entry.id in this.events_published[eventname] && keys_index in this.events_published[eventname][entry.id]) {
       for (let k in data['params'])
-        if (!(k in event_keys) && (!(k in this.events_published[eventname][entry.id][keys_index]['params']) || data['params'][k] != this.events_published[eventname][entry.id][keys_index]['params'][k]))
+        if (!event_keys.includes(k) && (!(k in this.events_published[eventname][entry.id][keys_index]['params']) || data['params'][k] != this.events_published[eventname][entry.id][keys_index]['params'][k]))
           data['changed_params'][k] = data['params'][k];
       for (let k in this.events_published[eventname][entry.id][keys_index]['params'])
         if (!(k in data['params']))
           data['params'][k] = this.events_published[eventname][entry.id][keys_index]['params'][k]
     } else
       for (let k in data['params'])
-        if (!(k in event_keys))
+        if (!event_keys.includes(k))
           data['changed_params'][k] = data['params'][k];
 
     if (!(eventname in this.events_published))
@@ -1566,7 +1574,7 @@ AutomatoSystem = function(caller_context) {
       for (let entry_ref in this.events_listeners[eventname])
         if (entry_ref == '*' || this.entry_id_match(entry, entry_ref))
           //console.debug("_entry_event_invoke_listeners_match" + str(this.events_listeners[eventname][entry_ref]))
-          for ([listener, condition, reference_entry_id] of this.events_listeners[eventname][entry_ref])
+          for (let [listener, condition, reference_entry_id] of this.events_listeners[eventname][entry_ref])
             if (listener) {
               let _s = this._stats_start();
               if (condition == null || this._entry_event_params_match_condition(eventdata, condition))
@@ -1642,7 +1650,7 @@ AutomatoSystem = function(caller_context) {
       qos = topic in entry.definition['publish'] && 'qos' in entry.definition['publish'][topic] ? entry.definition['publish'][topic]['qos'] : 0;
     if (retain == null)
       retain = topic in entry.definition['publish'] && 'retain' in entry.definition['publish'][topic] ? entry.definition['publish'][topic]['retain'] : false;
-    let message = new this.Message(topic, payload, qos, retain);
+    let message = new this.Message(this, topic, payload, qos, retain);
     
     if (response_callback || no_response_callback)
       this.subscribe_response(entry, message, response_callback, no_response_callback, response_id);
@@ -1653,11 +1661,10 @@ AutomatoSystem = function(caller_context) {
   this.entry_publish_current_default_topic_var = null;
 
   this.entry_publish_current_default_topic = function(set_topic = null) {
-    if (this.entry_publish_current_default_topic_var == null)
-      this.entry_publish_current_default_topic_var = threading.local();
+    // JS: no threads, a simple var replaces threading.local()
     if (set_topic)
-      this.entry_publish_current_default_topic_var.topic = set_topic;
-    return 'topic' in this.entry_publish_current_default_topic_var ? this.entry_publish_current_default_topic_var.topic : null;
+      this.entry_publish_current_default_topic_var = set_topic;
+    return this.entry_publish_current_default_topic_var;
   }
 
   this.subscribe_response = function(entry, message, callback = false, no_response_callback = false, id = false, default_count = 1, default_duration = 5) {
@@ -1683,17 +1690,17 @@ AutomatoSystem = function(caller_context) {
     for (let entry_id  in subs) {
       let r = subs[entry_id];
       if (r['definition'] && 'response' in r['definition'])
-        for (let t in r['definition']['response'])
+        for (let t of r['definition']['response'])
           if ('topic' in t) {
             let rtopic_rule = t['topic'];
             if (rtopic_rule.indexOf("{") >= 0)
               for (let i in r['matches'])
                 rtopic_rule = rtopic_rule.replace("{matches[" + i + "]}", "" + r['matches'][i]);
-            s['listeners'].push({ 'topic_rule': rtopic_rule, 'expiry': timems() + ('duration' in t ? read_duration(t['duration']) : default_duration) * 1000, 'count': 0, 'max_count': 'count' in t ? t['count'] : default_count });
+            s['listeners'].push({ 'topic_rule': rtopic_rule, 'expiry': this.timems() + ('duration' in t ? read_duration(t['duration']) : default_duration) * 1000, 'count': 0, 'max_count': 'count' in t ? t['count'] : default_count });
           }
     }
     
-    if (!s['listeners'])
+    if (!s['listeners'].length)
       return false;
     
     this.subscribed_response.push(s);
@@ -1714,29 +1721,21 @@ AutomatoSystem = function(caller_context) {
     // If there is a lot of delay in mqtt queue, we can assume there are probably a lot of messages managed by mqtt broker, so it could be a normal slowly processing of messages. So we add some more delay (20%).
     delay = delay * 1.2;
     
-    for (let x of this.subscribed_response.values()) {
-      let do_remove = false;
+    for (let x of this.subscribed_response.values())
       for (let l of x['listeners'].values())
         if (l['expiry'] + delay > now && (l['count'] == 0 || l['count'] < l['max_count'])) {
           let matches = this.topic_matches(l['topic_rule'], message.topic, message.payload);
           if (matches['matched']) {
             l['count'] = l['count'] + 1;
-            let final = true;
-            for (let m of x['listeners'].values())
-              if (m['count'] > 0 && m['max_count'] > 0) {
-                final = false;
-                break;
-              }
+            let final = !x['listeners'].some(function(m) { return m['count'] == 0 && m['max_count'] > 0; });
             if (x['callback'])
               x['callback'](x['entry'], x['id'], message, final, x['message']);
             x['called'] = true
           }
-          do_remove = true;
-        } else
-          do_remove = true;
-      if (do_remove)
-        x['listeners'] = x['listeners'].filter(function(l) {return l['expiry'] + delay > now && (l['count'] == 0 || l['count'] < l['max_count']) });
-    }
+        }
+    for (let x of this.subscribed_response.values())
+      if (x['listeners'].some(function(l) { return l['expiry'] + delay <= now || l['count'] <= 0; }))
+        x['listeners'] = x['listeners'].filter(function(l) { return l['expiry'] + delay > now && (l['count'] == 0 || l['count'] < l['max_count']); });
   }
 
   this._subscription_timer_thread = async function() {
@@ -1755,16 +1754,16 @@ AutomatoSystem = function(caller_context) {
         for (let l of x['listeners'].values())
           if (l['expiry'] + delay <= now)
             expired.push(l);
-        if (expired)
+        if (expired.length)
           x['listeners'] = x['listeners'].filter(function (l) { return !expired.includes(l); });
         
-        if (!x['listeners']) {
+        if (!x['listeners'].length) {
           if (x['no_response_callback'] && !('called' in x))
             x['no_response_callback'](x['entry'], x['id'], x['message']);
           expired_response.push(x);
         }
       }
-      if (expired_response)
+      if (expired_response.length)
         this.subscribed_response = this.subscribed_response.filter(function(x) { return !expired_response.includes(x); });
 
       this.events_groups_check();
@@ -1849,7 +1848,7 @@ AutomatoSystem = function(caller_context) {
             let data = isinstance(entry.definition['publish'][topic]['events'][eventname], 'list') ? entry.definition['publish'][topic]['events'][eventname] : [ entry.definition['publish'][topic]['events'][eventname] ];
             for (let eventparams of data) 
               this._entry_event_publish(entry, eventname.slice(0, -5), eventparams, -1);
-          } else if (eventname.endswith(':group') && isinstance(entry.definition['publish'][topic]['events'][eventname], 'int') && entry.definition['publish'][topic]['events'][eventname] > 0)
+          } else if (eventname.endsWith(':group') && isinstance(entry.definition['publish'][topic]['events'][eventname], 'int') && entry.definition['publish'][topic]['events'][eventname] > 0)
             this.events_groups[entry.id + '.' + eventname.slice(0, -6)] = { 'group_time': entry.definition['publish'][topic]['events'][eventname], 'data': {}};
         }
     if ('events' in entry.definition)
@@ -1968,7 +1967,8 @@ AutomatoSystem = function(caller_context) {
   }
 
   this.entry_on_event_lambda = function(entry) {
-    return function(event, listener, condition = null, reference_entry = null, reference_tag = null) { return this.entry_on_event(entry, event, listener, condition, reference_entry, reference_tag) };
+    let this_system = this;
+    return function(event, listener, condition = null, reference_entry = null, reference_tag = null) { return this_system.entry_on_event(entry, event, listener, condition, reference_entry, reference_tag) };
   }
 
   this.entry_on_event = function(entry, event, listener, condition = null, reference_entry = null, reference_tag = null) {
@@ -2021,7 +2021,8 @@ AutomatoSystem = function(caller_context) {
   }
   
   this.do_action_lambda = function(entry) {
-    return function(actionref, params = {}, if_event_not_match = false, if_event_not_match_keys = false, if_event_not_match_timeout = null) { return do_action(actionref, params, entry, if_event_not_match, if_event_not_match_keys, if_event_not_match_timeout); };
+    let this_system = this;
+    return function(actionref, params = {}, if_event_not_match = false, if_event_not_match_keys = false, if_event_not_match_timeout = null) { return this_system.do_action(actionref, params, entry, if_event_not_match, if_event_not_match_keys, if_event_not_match_timeout); };
   }
 
   this.do_action = function(actionref, params = {}, reference_entry_id = null, if_event_not_match = false, if_event_not_match_keys = false, if_event_not_match_timeout = null) {
@@ -2030,7 +2031,8 @@ AutomatoSystem = function(caller_context) {
   }
 
   this.entry_do_action_lambda = function(entry) {
-    return function(action, params = {}, init = null, if_event_not_match = false, if_event_not_match_keys = false, if_event_not_match_timeout = null) { return entry_do_action(entry, action, params, init, if_event_not_match, if_event_not_match_keys, if_event_not_match_timeout); };
+    let this_system = this;
+    return function(action, params = {}, init = null, if_event_not_match = false, if_event_not_match_keys = false, if_event_not_match_timeout = null) { return this_system.entry_do_action(entry, action, params, init, if_event_not_match, if_event_not_match_keys, if_event_not_match_timeout); };
   }
 
   this.entry_do_action = function(entry_or_id, action, params = {}, init = null, if_event_not_match = false, if_event_not_match_keys = false, if_event_not_match_timeout = null) {
@@ -2045,7 +2047,7 @@ AutomatoSystem = function(caller_context) {
       if (if_event_not_match) {
         let event = this.entry_event_get(if_event_not_match['entry'], if_event_not_match['event'], if_event_not_match['condition'], /*keys = */null, /*timeout = */if_event_not_match_timeout);
         if (event) {
-          match = true;
+          let match = true;
           for (let k of (if_event_not_match_keys ? if_event_not_match_keys : Object.keys(params)))
             match = match && (k in params && k in event && params[k] == event[k]);
           if (match)
@@ -2064,7 +2066,7 @@ AutomatoSystem = function(caller_context) {
           if ('init' in actiondef && actiondef['init'])
             exec_context = scripting_js.script_exec(actiondef['init'], exec_context);
           if (init)
-            exec_context = scripting_js.script_exec(init, context, exec_context);
+            exec_context = scripting_js.script_exec(init, exec_context);
           let payload = scripting_js.script_eval(actiondef['payload'], exec_context, /*to_dict = */true);
           if (payload != null) {
             if ('topic' in actiondef && actiondef['topic']) {
@@ -2120,29 +2122,20 @@ AutomatoSystem = function(caller_context) {
         let t = this.entry_event_keys_index_is_temporary(keys_index);
         if ((t && temporary) || (!t && !temporary)) {
           let e = this.events_published[eventname][entry_id][keys_index];
-          if ((timeout == null || this.time() - e['time'] <= read_duration(timeout)) && (condition == null || _entry_event_params_match_condition(e, condition)) && (!match || e['time'] > match['time']))
+          if ((timeout == null || this.time() - e['time'] <= read_duration(timeout)) && (condition == null || this._entry_event_params_match_condition(e, condition)) && (!match || e['time'] > match['time']))
             match = e;
         }
       }
     if (match) {
-      if (!keys)
-        return match['params'];
-      let res = [];
-      for (let k of keys)
-        if (k == '_time' || k in match['params']) {
-          v = k == '_time' ? match['time'] : match['params'][k];
-          if (keys.length == 1)
-            return v;
-          res.push(v);
-        }
-      return nan_remove(res);
+      let ret = keys == null ? [ match['params'] ] : keys.map(function(k) { return k == '_time' ? match['time'] : (k in match['params'] ? match['params'][k] : null); });
+      return nan_remove(ret.length <= 1 ? ret[0] : ret);
     }
 
     return keys == null || len(keys) == 1 ? null : Array(keys.length).fill(null);
   }
 
   this.entry_event_get_time = function(entry_or_id, eventname, timeout = null, temporary = false) {
-    this.entry_event_get(entry_or_id, eventname, ['_time'], timeout, temporary);
+    return this.entry_event_get(entry_or_id, eventname, /*condition = */null, /*keys = */['_time'], /*timeout = */timeout, /*temporary = */temporary);
   }
   
   this.entry_events_published = function(entry_or_id) {
@@ -2151,7 +2144,7 @@ AutomatoSystem = function(caller_context) {
     */
     let res = {}
     let entry = !isinstance(entry_or_id, 'str') ? entry_or_id : this.entry_get(entry_or_id);
-    for (eventname in entry.events) {
+    for (let eventname in entry.events) {
       res[eventname] = {}
       if (eventname in this.events_published && entry.id in this.events_published[eventname])
         for (let keys_index in this.events_published[eventname][entry.id])
@@ -2205,9 +2198,14 @@ AutomatoSystem = function(caller_context) {
   
   this.events_export = function() {
     let all_events = {};
-    for (entry_id in this.all_entries)
+    for (let entry_id in this.all_entries)
       all_events[entry_id] = this.entry_events_published(entry_id);
     return all_events;
+  }
+
+  // JS only: regexp groups in plain object, with null (and not undefined) for unmatched groups, like python groupdict()
+  this._re_groupdict = function(m) {
+    return m ? Object.fromEntries(Object.entries(m.groups).map(function(v) { return [v[0], v[1] === undefined ? null : v[1]]; })) : null;
   }
 
   this._re_decode_event_reference = new RegExp('^(?<entry>[A-Za-z0-9@*_-]+)?(?:\\.(?<event>[A-Za-z0-9_-]+))?(?:\\((?<condition>.*)\\))?$');
@@ -2218,8 +2216,7 @@ AutomatoSystem = function(caller_context) {
     @params no_event: true if (is possibile to NOT specify an event in the string, ex) { "entry(condition)"
     @return { "entry": "...", "event": "...", "condition": "..." }
     */
-    let m = this._re_decode_event_reference.exec(s);
-    m = m ? m.groups : null;
+    let m = this._re_groupdict(this._re_decode_event_reference.exec(s));
     if (m && default_entry_id && !m['entry'])
       m['entry'] = default_entry_id;
     if (m && default_event && !m['event'])
@@ -2235,8 +2232,7 @@ AutomatoSystem = function(caller_context) {
     @params no_action: true if (is possibile to NOT specify an action in the string, ex) { "entry(init)"
     @return { "entry": "...", "action": "...", "init": "..." }
     */
-    let m = this._re_decode_action_reference.exec(s);
-    m = m ? m.groups : null;
+    let m = this._re_groupdict(this._re_decode_action_reference.exec(s));
     if (m && default_entry_id && !m['entry'])
       m['entry'] = default_entry_id;
     if (m && default_action && !m['action'])
@@ -2247,7 +2243,7 @@ AutomatoSystem = function(caller_context) {
   this.generate_event_reference = function(entry_id, eventname, eventdata) {
     let condition = '';
     if ('keys' in eventdata && eventdata['keys']) {
-      for (k in eventdata['keys'])
+      for (let k in eventdata['keys'])
         condition = condition + (condition ? ' && ' : '') + 'params["' + k + '"] == ' + json_export(eventdata['keys'][k]);
       condition = '(js: ' + condition + ')';
     }
@@ -2263,12 +2259,12 @@ AutomatoSystem = function(caller_context) {
     let d = !isinstance(actionref, 'dict') ? this.decode_action_reference(actionref, /*default_entry_id = */null, /*default_action = */null, /*no_action = */true) : actionref;
     if (!d)
       return null;
-    let r = {'entry': d['entry'], 'event': d['action'] ? transform_action_name_to_event_name(d['action']) : null, 'condition': d['init'] ? d['init'].strip('; ').replace('=', '==').replace(';', '&&') : null };
+    let r = {'entry': d['entry'], 'event': d['action'] ? this.transform_action_name_to_event_name(d['action']) : null, 'condition': d['init'] ? d['init'].replace(/^[; ]+|[; ]+$/g, '').replace(/=/g, '==').replace(/;/g, '&&') : null };
     return return_decoded ? r : r['entry'] + (r['event'] ? ('.' + r['event']) : '') + (r['condition'] ? ('(' + r['condition'] + ')') : '');
   }
 
   this.transform_action_name_to_event_name = function(actionname) {
-    return actionname.replace('-set', '');
+    return actionname.replace(/-set/g, '');
   }
 
   this.transform_event_reference_to_action_reference = function(eventref, return_decoded = false) {
@@ -2277,10 +2273,10 @@ AutomatoSystem = function(caller_context) {
     Add the "-set" postfix to event name and replace "==" with "=" and "&&" with ";" in condition
     Example: "js: event(js: params['x'] == 1 && params['y'] == 2)" > "js: event-set(js: params['x'] = 1; params['y'] = 2;)"
     */
-    let d = !isinstance(eventref, 'dict') ? decode_event_reference(eventref, /*default_entry_id = */null, /*default_event = */null, /*no_event = */true) : eventref;
+    let d = !isinstance(eventref, 'dict') ? this.decode_event_reference(eventref, /*default_entry_id = */null, /*default_event = */null, /*no_event = */true) : eventref;
     if (!d)
       return null
-    let r = {'entry': d['entry'], 'action': d['event'] ? (d['event'] + '-set') : null, 'init': d['condition'] ? d['condition'].replace('==', '=').replace('&&', ';') : null };
+    let r = {'entry': d['entry'], 'action': d['event'] ? (d['event'] + '-set') : null, 'init': d['condition'] ? d['condition'].replace(/==/g, '=').replace(/&&/g, ';') : null };
     return return_decoded ? r : r['entry'] + (r['action'] ? ('.' + r['action']) : '') + (r['init'] ? ('(' + r['init'] + ')') : '');
   }
 };

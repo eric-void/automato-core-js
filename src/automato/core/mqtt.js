@@ -76,13 +76,23 @@ AutomatoMqtt = function(system) {
   // callback(phase): 1 = connection started, 2 = connection established, 3 = first message received
   this.connect = function(callback = null) {
     this.settings['_connect_callback'] = callback
-    client_id = this.settings['client_id'];
+    let client_id = this.settings['client_id'];
     if (this.settings['client_id_random_postfix'])
       client_id = client_id + '-' + Math.random().toString(36).substring(2, 7);
     console.debug('connecting to mqtt broker {proto}://{host}:{port}, with client_id: {client_id} ...'.format({proto: this.settings['broker_protocol'], host: this.settings['broker_host'], port: this.settings['broker_port'], client_id: client_id}));
-    this.client = mqtt.connect(this.settings['broker_protocol'] + '://' + this.settings['broker_host'] + ':' + this.settings['broker_port'], {clientId: client_id, username: this.settings['broker_user'], password: this.settings['broker_pass'], connectTimeout: 10 * 1000, clean: true});
+    let options = {clientId: client_id, connectTimeout: 10 * 1000, clean: true};
+    // Empty credentials must not be sent: a broker with anonymous access closes the connection
+    if (this.settings['broker_user'])
+      options.username = this.settings['broker_user'];
+    if (this.settings['broker_pass'])
+      options.password = this.settings['broker_pass'];
+    this.client = mqtt.connect(this.settings['broker_protocol'] + '://' + this.settings['broker_host'] + ':' + this.settings['broker_port'], options);
+    this._skipEmptyWrites(this.client);
     this.client.on('connect', this._onConnect.bind(this));
-    this.client.on('disconnect', this._onDisconnect.bind(this));
+    // mqtt.js handles automatic reconnection. 'close' is emitted at every lost connection (the 'disconnect' event is only for a DISCONNECT packet sent by the broker)
+    this.client.on('close', this._onDisconnect.bind(this));
+    this.client.on('reconnect', this._onReconnect.bind(this));
+    this.client.on('error', function(error) { console.error('mqtt client error', error); });
     this.client.on('message', this._onMessage.bind(this));
     this.connected = 1
     this.connected_since = 0
@@ -90,12 +100,36 @@ AutomatoMqtt = function(system) {
       this.settings['_connect_callback'](this.connected)
   }
 
+  /**
+   * mqtt.js writes the empty payload of a message as a separate empty websocket frame, and mosquitto 2.1 closes the connection when it receives it.
+   * The stream is rebuilt at every reconnection.
+   */
+  this._skipEmptyWrites = function(client) {
+    function guard() {
+      let stream = client.stream;
+      if (stream) {
+        let write = stream.write;
+        stream.write = function(chunk) {
+          return chunk !== null && chunk !== undefined && chunk.length === 0 ? true : write.apply(stream, arguments);
+        };
+      }
+    }
+    guard();
+    if (client._setupStream) {
+      let setupStream = client._setupStream;
+      client._setupStream = function() {
+        setupStream.apply(client, arguments);
+        guard();
+      };
+    }
+  }
+
   this._onConnect = function(connact) {
     console.debug('connected');
     if ("all" in this.settings && this.settings['all'])
       this.client.subscribe("#");
     else if ("subscribe" in this.settings)
-      for (v in settings["subscribe"])
+      for (let v in this.settings["subscribe"])
         if (v != "[all]" && v != "[else]")
           this.client.subscribe(v);
     this.connected = 2;
@@ -104,19 +138,27 @@ AutomatoMqtt = function(system) {
       this.settings['_connect_callback'](this.connected);
     if (this.disconnect_queue.length) {
       console.debug("there is something to publish in the queue");
-      for (q of this.disconnect_queue)
+      for (let q of this.disconnect_queue)
         this.publish(q[0], q[1], q[2], q[3]);
       this.disconnect_queue = [];
     }
   }
 
-  this._onDisconnect = function(packet) {
+  this._onDisconnect = function() {
     this.connected = 0
     this.connected_since = 0
     //if rc != 0:
     //  console.error('unexpected disconnection from mqtt broker');
     //else
       console.debug('disconnected from mqtt broker');
+  }
+
+  this._onReconnect = function() {
+    this.connected = 1
+    this.connected_since = 0
+    console.debug('reconnecting to mqtt broker ...');
+    if ('_connect_callback' in this.settings && this.settings['_connect_callback'])
+      this.settings['_connect_callback'](this.connected);
   }
   
   /**
@@ -156,15 +198,15 @@ AutomatoMqtt = function(system) {
         let slow = system.time() > this.context.connected_since + 300 && delay > this.context.settings['warning_slow_queue_ms']
         if (slow)
           console.warn("Slow mqtt_communication_queue, last message fetched in {ms} ms: {msg}".format({ms: delay, msg: d}));
-        if (this.mqtt_communication_recent_delay > 0 && this.mqtt_communication_recent_delay_timems < timems - 60000) {
-          this.mqtt_communication_recent_delay = timems - this.mqtt_communication_recent_delay_timems < 3600000 ? this.mqtt_communication_recent_delay / Math.pow(2, (timems - this.mqtt_communication_recent_delay_timems) / 1000) : 0;
-          if (this.mqtt_communication_recent_delay < 1000)
-            this.mqtt_communication_recent_delay = 0;
-          this.mqtt_communication_recent_delay_timems = this.mqtt_communication_recent_delay > 0 ? timems : 0;
+        if (this.context.mqtt_communication_recent_delay > 0 && this.context.mqtt_communication_recent_delay_timems < timems - 60000) {
+          this.context.mqtt_communication_recent_delay = timems - this.context.mqtt_communication_recent_delay_timems < 3600000 ? this.context.mqtt_communication_recent_delay / Math.pow(2, (timems - this.context.mqtt_communication_recent_delay_timems) / 1000) : 0;
+          if (this.context.mqtt_communication_recent_delay < 1000)
+            this.context.mqtt_communication_recent_delay = 0;
+          this.context.mqtt_communication_recent_delay_timems = this.context.mqtt_communication_recent_delay > 0 ? timems : 0;
         }
-        if (delay > this.mqtt_communication_recent_delay) {
-          this.mqtt_communication_recent_delay = delay;
-          this.mqtt_communication_recent_delay_timems = timems;
+        if (delay > this.context.mqtt_communication_recent_delay) {
+          this.context.mqtt_communication_recent_delay = delay;
+          this.context.mqtt_communication_recent_delay_timems = timems;
         }
         
         if (d['type'] == 'publish')
@@ -180,11 +222,11 @@ AutomatoMqtt = function(system) {
               this.context.cache[d['topic']] = decoded;
             if ("subscribe" in this.context.settings) {
               let done = false;
-              for (v in this.context.settings["subscribe"]) {
-                if (v != "[all]" && v != "[else]" && callable(settings["subscribe"][v])) {
+              for (let v in this.context.settings["subscribe"]) {
+                if (v != "[all]" && v != "[else]" && callable(this.context.settings["subscribe"][v])) {
                   let is_regex = v.startsWith("/") && v.endsWith("/");
                   let matches = is_regex ? this.context._topicMatchesToList(d['topic'].match(v.slice(1,-1))) : [];
-                  if ((!is_regex && this.context.topicMatchesMQTT(v, d['topic'])) || (is_regex && matches)) {
+                  if ((!is_regex && this.context.topicMatchesMQTT(v, d['topic'])) || (is_regex && matches.length)) {
                     this.context.settings["subscribe"][v](d['topic'], d['payload'], deepcopy(decoded), d['qos'], d['retain'], matches, d['timems']);
                     done = true;
                   }
@@ -216,16 +258,17 @@ AutomatoMqtt = function(system) {
     // if settings["message-logger"] != '':
     //   console.getLogger(settings["message-logger"]).info("publishing on broker {topic} = {payload} (qos = {qos}, retain = {retain})".format(topic = topic, payload = str(payload), qos = qos, retain = retain))
     try {
-      this.client.publish(topic, payload, qos, retain);
+      // mqtt.js signature: publish(topic, message, options, callback)
+      this.client.publish(topic, payload != null ? payload : '', {qos: qos ? qos : 0, retain: retain ? true : false});
     } catch (exception) {
-      console.exception("error publishing topic on broker", exception);
+      console.error("error publishing topic on broker", exception);
     }
   }
 
   this._onMessage = function(topic, payload, packet) {
     if (this.settings['topic_filter_ignore'])
       for (let f of this.settings['topic_filter_ignore'])
-        if (this.topicMatches(topic, f)) {
+        if (this.topicMatches(topic, f).length) {
           console.debug('ignored message{retained} {topic} = {payload}'.format({topic: topic, payload: payload, retained: packet.retain ? ' (retained)' : ''}));
           return;
         }
@@ -262,11 +305,8 @@ AutomatoMqtt = function(system) {
   }
 
   this._decodePayload = function(v) {
-    if (typeof(v) == "string" && v.length && (v[0] == '{' || v[0] == '['))
-      try {
-        return json_import(v);
-      } catch (e) {
-      }
+    if (typeof(v) == "string" && v.length && ((v[0] == '[' && v[v.length - 1] == ']') || (v[0] == '{' && v[v.length - 1] == '}')))
+      return json_import(v);
     //f = parseFloat(v)
     //if (isNaN(f))
     //  return v;
@@ -276,17 +316,13 @@ AutomatoMqtt = function(system) {
   }
 
   this._timePayload = function(v) {
-    if (typeof v == "string" && ":" in v) {
-      try {
-        return Math.floor(new Date(v).getTime() / 1000);
-      } catch (e) {
-      }
+    if (typeof v == "string" && v.indexOf(":") >= 0) {
+      let t = new Date(v).getTime();
+      return !Number.isNaN(t) ? Math.floor(t / 1000) : null;
     }
-    try {
-      v = parseInt(v);
-    } catch (e) {
+    v = parseInt(v);
+    if (Number.isNaN(v))
       return null;
-    }
     if (v > 1E12)
       v = Math.floor(v / 1000);
     return v;
@@ -297,7 +333,7 @@ AutomatoMqtt = function(system) {
       console.info("Disconnected");
       this.connected = 0;
       this.connected_since = 0;
-    });
+    }.bind(this));
   }
 
   this.publish = function(topic, payload, qos = 0, retain = false) {
@@ -310,15 +346,15 @@ AutomatoMqtt = function(system) {
           // TODO getLogger(settings["message-logger"])
           console.info("publishing on broker {topic} = {payload} (qos = {qos}, retain = {retain})".format({topic: topic, payload: payload, qos: qos, retain: retain}));
         this.connect();
-        this.client.publish(topic, payload, qos, retain);
+        this._mqtt_communication_publish(topic, payload, qos, retain);
         this.disconnect();
       } else if (this.settings['publish_before_connection_policy'] == 'queue') {
         console.debug("broker not connected, adding publish action to queue: {topic} (qos = {qos}, retain = {retain})".format({topic: topic, qos: qos, retain: retain}));
         if (this.settings["message-logger"] != '')
           // TODO getLogger(settings["message-logger"]).
-          console.info("adding publish action to queue: {topic} = {payload} (qos = {qos}, retain = {retain})".format({topic: topic, payload: strpayload, qos: qos, retain: retain}));
+          console.info("adding publish action to queue: {topic} = {payload} (qos = {qos}, retain = {retain})".format({topic: topic, payload: payload, qos: qos, retain: retain}));
         var replaced = false;
-        for (qi in this.disconnect_queue)
+        for (let qi in this.disconnect_queue)
           if (this.disconnect_queue[qi][0] == topic) {
             this.disconnect_queue[qi] = [topic, payload, qos, retain];
             replaced = true;

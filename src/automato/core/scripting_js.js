@@ -25,7 +25,7 @@ function AutomatoScriptingJs(system, caller_context) {
       'now': Math.floor((new Date()).getTime() / 1000),
       'd': read_duration,
       't': parse_datetime,
-      'uniqid': this.uniqid,
+      'uniqid': this._uniqid,
       'strftime': strftime,
       'array_sum': array_sum,
       'array_avg': array_avg,
@@ -43,19 +43,20 @@ function AutomatoScriptingJs(system, caller_context) {
   }
 
   this.script_context_return = function(script_context, original_context) {
-    for (k in script_context) {
+    for (let k in script_context) {
       if (typeof script_context[k] != 'undefined' && !['now', 'd', 't', 'print'].includes(k) && !(k in this.exports) && (!(k in original_context) || original_context[k] != script_context[k]))
         original_context[k] = script_context[k];
     }
-    for (k in original_context)
+    for (let k in original_context)
       if (!(k in script_context) || typeof script_context[k] == 'undefined')
         delete original_context[k];
   }
 
   /**
+   * @param to_dict Not used in js (it's needed in python to convert js objects)
    * @param cache Code excecution can be cached (this parameter is NOT used right now)
    */
-  this.script_eval = function(code, context = {}, cache = false) {
+  this.script_eval = function(code, context = {}, to_dict = false, cache = false) {
     let _s = system._stats_start();
     try {
       if (code.startsWith('js:'))
@@ -175,12 +176,12 @@ function AutomatoScriptingJs(system, caller_context) {
     if (code.startsWith('js:'))
       code = code.slice(3).trim();
     try {
-      this_context = this.script_context(context);
+      let this_context = this.script_context(context);
       (new Function( "with(this) { " + code + "}")).call(this_context);
       this.script_context_return(this_context, context);
       if (return_context) {
         ret = {};
-        for (let k in (isinstance(return_context, 'list') ? return_context : context))
+        for (let k of (isinstance(return_context, 'list') ? return_context : Object.keys(context)))
           ret[k] = context[k];
       }
       
@@ -195,7 +196,7 @@ function AutomatoScriptingJs(system, caller_context) {
   var uniqid_c = 0;
   
   this._uniqid = function() {
-    return system.default_node_name + ':' + uniqid_seed + ':' + (++c);
+    return system.default_node_name + ':' + uniqid_seed + ':' + (++uniqid_c);
   }
 }
 
