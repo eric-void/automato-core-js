@@ -1167,7 +1167,7 @@ AutomatoSystem = function(caller_context) {
 
   this.entry_topic_published_definition = function(entry, topic, payload = null, strict_match = false, skip_topic_match_priority = false) {
     if (topic in entry.definition['publish'])
-      return entry.definition['publish'];
+      return entry.definition['publish'][topic];
     let res = null;
     if (!strict_match)
       for (let topic_rule in entry.definition['publish']) {
@@ -1183,12 +1183,13 @@ AutomatoSystem = function(caller_context) {
   }
 
   this.entry_is_publisher_of = function(entry, topic, payload = null) {
-    return len(this.entry_topic_published_definition(entry, topic, payload, false, true)) > 0;
+    // NOTE: an empty definition (like 'base/#': {}) is a valid one
+    return this.entry_topic_published_definition(entry, topic, payload, false, true) != null;
   }
 
   this.entry_topic_subscription_definition = function(entry, topic, payload = null, strict_match = false, skip_topic_match_priority = false) {
     if (topic in entry.definition['subscribe'])
-      return entry.definition['subscribe'];
+      return entry.definition['subscribe'][topic];
     let res = null;
     if (!strict_match)
       for (let topic_rule in entry.definition['subscribe']) {
@@ -1204,7 +1205,8 @@ AutomatoSystem = function(caller_context) {
   }
 
   this.entry_is_subscribed_to = function(entry, topic, payload = null) {
-    return len(this.entry_topic_subscription_definition(entry, topic, payload, false, true)) > 0;
+    // NOTE: an empty definition (like 'base/#': {}) is a valid one
+    return this.entry_topic_subscription_definition(entry, topic, payload, false, true) != null;
   }
 
 
@@ -1279,15 +1281,15 @@ AutomatoSystem = function(caller_context) {
       /*
       Return first publishedMessaged NOT internal (if present), or internal (if no NOT internal is found)
       */
-      if (this._publishedMessages && this._firstPublishedMessage == null) {
-        for (let pm of this.publishedMessages().values())
+      if (this._firstPublishedMessage == null) {
+        let pms = this.publishedMessages();
+        for (let pm of pms.values())
           if (!pm.internal) {
             this._firstPublishedMessage = pm;
             break;
           }
-        if (this._firstPublishedMessage == null)
-          for (let pm of this.publishedMessages().values())
-            this._firstPublishedMessage = pm;
+        if (this._firstPublishedMessage == null && pms.length)
+          this._firstPublishedMessage = pms[0];
       }
       return this._firstPublishedMessage;
     }
@@ -1758,35 +1760,49 @@ AutomatoSystem = function(caller_context) {
 
   this._subscription_timer_thread = async function() {
     /*
-    An internal thread, initialied by init(), that scans for expired subscribed response topics (@see subscribe_response)
+    An internal thread, initialied by init(), that scans for expired subscribed response topics (@see subscribe_response) and manages events groups
     */
     while (thread_check(this.subscription_thread)) {
-      let now = this.timems();
-      let delay = Math.round(mqtt.queueDelay() / 1000 + 0.49) * 1000;
-      // If there is a lot of delay in mqtt queue, we can assume there are probably a lot of messages managed by mqtt broker, so it could be normal a slowly processing of messages. So we add some more delay (20%).
-      delay = delay * 1.2;
-      
-      let expired_response = []
-      for (let x of this.subscribed_response.values()) {
-        let expired = [];
-        for (let l of x['listeners'].values())
-          if (l['expiry'] + delay <= now)
-            expired.push(l);
-        if (expired.length)
-          x['listeners'] = x['listeners'].filter(function (l) { return !expired.includes(l); });
-        
-        if (!x['listeners'].length) {
-          if (x['no_response_callback'] && !('called' in x))
-            x['no_response_callback'](x['entry'], x['id'], x['message']);
-          expired_response.push(x);
-        }
+      try {
+        this._subscription_timer_step();
+      } catch (e) {
+        // This thread must never die: response timeouts and events groups depend on it
+        console.error("SYSTEM> Error in subscription timer thread", e);
       }
-      if (expired_response.length)
-        this.subscribed_response = this.subscribed_response.filter(function(x) { return !expired_response.includes(x); });
-
-      this.events_groups_check();
       await thread_sleep(.5);
     }
+  }
+
+  this._subscription_timer_step = function(now = null) {
+    if (now === null)
+      now = this.timems();
+    let delay = Math.round(mqtt.queueDelay() / 1000 + 0.49) * 1000;
+    // If there is a lot of delay in mqtt queue, we can assume there are probably a lot of messages managed by mqtt broker, so it could be normal a slowly processing of messages. So we add some more delay (20%).
+    delay = delay * 1.2;
+    
+    let expired_response = []
+    for (let x of this.subscribed_response.values()) {
+      let expired = [];
+      for (let l of x['listeners'].values())
+        if (l['expiry'] + delay <= now)
+          expired.push(l);
+      if (expired.length)
+        x['listeners'] = x['listeners'].filter(function (l) { return !expired.includes(l); });
+      
+      if (!x['listeners'].length)
+        expired_response.push(x);
+    }
+    if (expired_response.length)
+      this.subscribed_response = this.subscribed_response.filter(function(x) { return !expired_response.includes(x); });
+    for (let x of expired_response)
+      if (x['no_response_callback'] && !('called' in x))
+        try {
+          x['no_response_callback'](x['entry'], x['id'], x['message']);
+        } catch (e) {
+          console.error("SYSTEM> Error in no_response_callback for entry #" + (x['entry'] ? x['entry'].id : '?'), e);
+        }
+
+    this.events_groups_check();
   }
 
   this.events_groups_push = function(egkey, entry, data, event_keys, keys_index) {
@@ -1806,12 +1822,14 @@ AutomatoSystem = function(caller_context) {
         this.events_groups[egkey]['data'][keys_index]['data']['params'][k] = data['params'][k];
   }
 
-  this.events_groups_check = function() {
-    let now = mqtt.queueTimems()
-    if (now > 0)
-      now = Math.floor(now / 1000)
-    else
-      now = this.time();
+  this.events_groups_check = function(now = null) {
+    if (now === null) {
+      now = mqtt.queueTimems()
+      if (now > 0)
+        now = Math.floor(now / 1000)
+      else
+        now = this.time();
+    }
     for (let egkey in this.events_groups) {
       let to_delete = [];
       for (let keys_index in this.events_groups[egkey]['data']) {
@@ -2007,15 +2025,12 @@ AutomatoSystem = function(caller_context) {
   this.remove_event_listener_by_reference_entry = function(reference_entry_id) {
     for (let eventname in this.events_listeners) {
       for (let entry_ref in this.events_listeners[eventname]) {
-        if (this.entry_id_match(entry_ref, reference_entry_id))
+        // NOTE: listeners on events of the unloaded entry, registered by other entries, are kept: if the entry is reloaded (for example a remote entry with new metadata) they must continue to work
+        for (let i = this.events_listeners[eventname][entry_ref].length - 1; i >= 0; i--)
+          if (this.events_listeners[eventname][entry_ref][i][2] == reference_entry_id)
+            this.events_listeners[eventname][entry_ref].splice(i, 1);
+        if (!this.events_listeners[eventname][entry_ref].length)
           delete this.events_listeners[eventname][entry_ref];
-        else {
-          for (let i = this.events_listeners[eventname][entry_ref].length - 1; i >= 0; i--)
-            if (this.events_listeners[eventname][entry_ref][i][2] == reference_entry_id)
-              this.events_listeners[eventname][entry_ref].splice(i, 1);
-          if (!this.events_listeners[eventname][entry_ref].length)
-            delete this.events_listeners[eventname][entry_ref];
-        }
       }
       if (!Object.keys(this.events_listeners[eventname]).length)
         delete this.events_listeners[eventname];
@@ -2277,7 +2292,7 @@ AutomatoSystem = function(caller_context) {
     let d = !isinstance(actionref, 'dict') ? this.decode_action_reference(actionref, /*default_entry_id = */null, /*default_action = */null, /*no_action = */true) : actionref;
     if (!d)
       return null;
-    let r = {'entry': d['entry'], 'event': d['action'] ? this.transform_action_name_to_event_name(d['action']) : null, 'condition': d['init'] ? d['init'].replace(/^[; ]+|[; ]+$/g, '').replace(/=/g, '==').replace(/;/g, '&&') : null };
+    let r = {'entry': d['entry'], 'event': d['action'] ? this.transform_action_name_to_event_name(d['action']) : null, 'condition': d['init'] ? d['init'].replace(/^[; ]+|[; ]+$/g, '').replace(/(^|[^=!<>])=(?!=)/g, '$1==').replace(/;/g, '&&') : null };
     return return_decoded ? r : r['entry'] + (r['event'] ? ('.' + r['event']) : '') + (r['condition'] ? ('(' + r['condition'] + ')') : '');
   }
 

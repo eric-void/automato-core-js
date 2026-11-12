@@ -397,6 +397,35 @@ test('transform references between actions and events', () => {
   same(system.transform_event_reference_to_action_reference('a@b', true), { entry: 'a@b', action: null, init: null });
 });
 
+test('transform from action keeps comparison operators', () => {
+  let { system } = bootSystem();
+  assert.strictEqual(system.transform_action_reference_to_event_reference("a@b.x-set(js: params['x'] = params['a'] == 1; params['y'] = params['b'] != 2; params['z'] = params['c'] <= 3)"), "a@b.x(js: params['x'] == params['a'] == 1&& params['y'] == params['b'] != 2&& params['z'] == params['c'] <= 3)");
+});
+
+test('listeners on an entry survive its reload, and are removed with the entry that registered them', () => {
+  let defs = { 'dev@lab': { 'publish': { 'dev/state': { 'type': 'object', 'events': { 'output': "js:({ value: payload['value'] })" } } } }, 'listener@lab': {}, 'other@lab': {} };
+  let { system, receive } = bootSystem(defs);
+  let events = [];
+  system.on_event('dev@lab.output', function(entry, eventname, eventdata) { events.push('listener:' + eventdata['params']['value']); }, system.entry_get('listener@lab'));
+  system.on_event('dev@lab.output', function(entry, eventname, eventdata) { events.push('other:' + eventdata['params']['value']); }, system.entry_get('other@lab'));
+  system.entry_load({ 'dev@lab': Object.assign({}, defs['dev@lab'], { 'caption': 'Changed' }) }, false, false, false);
+  assert.strictEqual(system.entry_get('dev@lab').caption, 'Changed');
+  receive('dev/state', '{"value": 1}');
+  system.entry_unload('other@lab');
+  receive('dev/state', '{"value": 2}');
+  same(events, ['listener:1', 'other:1', 'listener:2']);
+});
+
+test('first published message is found without previous calls, an empty definition is a valid one', () => {
+  let { system } = bootSystem({ 'dev@lab': { 'publish': { 'dev/state': { 'type': 'object' }, 'dev/#': {} }, 'subscribe': { 'dev/set/#': {} } } });
+  let m = new system.Message(system, 'dev/state', {});
+  assert.strictEqual(m.firstPublishedMessage().topic_rule, 'dev/state');
+  let e = system.entry_get('dev@lab');
+  assert.strictEqual(system.entry_is_publisher_of(e, 'dev/other'), true);
+  assert.strictEqual(system.entry_is_subscribed_to(e, 'dev/set/x'), true);
+  same(system.entry_topic_published_definition(e, 'dev/state'), { 'type': 'object' });
+});
+
 //
 // Actions
 //
@@ -677,7 +706,7 @@ const JS_ONLY = {
   'mqtt': ['_onReconnect', '_skipEmptyWrites', 'cachePrint'],
 };
 const PY_ONLY = {
-  'system': [],
+  'system': ['_on_mqtt_message_process', '_topic_rule_parse'], // python only: thread-local current message reset, topic rules parse cache (performance on slow nodes)
   'mqtt': ['_magicCast', 'getLogger'],
 };
 const DIFFERENT_PARAMS = {

@@ -136,6 +136,12 @@
     { "entry_exists": "sensor@lab" },
     { "call": "entry_unload", "args": ["sensor@lab"] },
     { "entry_exists": "sensor@lab" },
-    { "call": "entries_publishers_of", "args": ["home/status"], "keys": true }
+    { "call": "entries_publishers_of", "args": ["home/status"], "keys": true },
+    { "entry_call": "entry_is_publisher_of", "entry": "light@lab", "args": ["home/light"] },
+    { "entry_call": "entry_is_subscribed_to", "entry": "history@lab", "args": ["other/topic"] },
+    { "entry_call": "entry_topic_published_definition", "entry": "light@lab", "args": ["home/light"], "pick": ["type", "notify"] },
+    { "entry_call": "entry_topic_subscription_definition", "entry": "history@lab", "args": ["history/get"], "pick": ["description"] },
+    { "call": "entries_publishers_of", "args": ["history/x"], "keys": true },
+    { "call": "transform_action_reference_to_event_reference", "args": ["a@b.x-set(js: params['x'] = params['a'] == 1; params['y'] = params['b'] != 2; params['z'] <= 3)"] }
   ]
 }

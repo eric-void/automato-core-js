@@ -132,7 +132,7 @@ function sort_map(data, recursive = false) {
   if (!is_dict(data))
     return data;
   let sorted = {};
-  Object.keys(data).sort().forEach(function(k) { sorted[k] = recursive ? sort_map(data[k]) : data[k]; });
+  Object.keys(data).sort().forEach(function(k) { sorted[k] = recursive ? sort_map(data[k], recursive) : data[k]; });
   return sorted;
 }
 
