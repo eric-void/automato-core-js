@@ -747,6 +747,26 @@ function compareApi(module, py, js) {
   return problems;
 }
 
+test('payload_transfer copies keys from a list or a dict (an empty name keeps the key), and generates events', () => {
+  let { system, receive } = bootSystem({
+    'inverter@lab': { 'publish': { 'inv/data': { 'type': 'object', 'events': {
+      'energy': [
+        "js:payload_transfer({'port': 'ac'}, payload, {'current': '', 'power_ac': 'power'})",
+        "js:payload_transfer({'port': 'dc'}, payload, {'power_dc': 'power'})",
+      ],
+      'stats': "js:payload_transfer({'port': 'inv'}, payload, ['status', 'model'])",
+      'temperature': "js:payload_transfer({'port': 'inv'}, payload, {'temp': 'value'})",
+    } } } },
+  });
+  receive('inv/data', '{"current": 1.5, "power_ac": 300, "power_dc": 310, "status": 4, "temp": 35}');
+  same(system.event_get('inverter@lab.energy(js:params["port"] == "ac")'), { 'port': 'ac', 'current': 1.5, 'power': 300 });
+  same(system.event_get('inverter@lab.energy(js:params["port"] == "dc")'), { 'port': 'dc', 'power': 310 });
+  same(system.event_get('inverter@lab.stats'), { 'port': 'inv', 'status': 4 });
+  same(system.event_get('inverter@lab.temperature'), { 'port': 'inv', 'value': 35 });
+  receive('inv/data', '{"power_ac": 500}');
+  same(system.event_get('inverter@lab.energy(js:params["port"] == "ac")')['power'], 500);
+});
+
 for (let module of ['system', 'mqtt'])
   test('functions and parameters are aligned with python: ' + module, () => {
     let pyPath = path.join(__dirname, '..', '..', 'automato-core-py', 'src', 'automato', 'core', module + '.py');

@@ -43,6 +43,20 @@
       "publish": { "home/light": { "description": "merged", "type": "object" } },
       "events_passthrough": [ { "on": "light@lab.output", "rename": "copied" } ]
     },
+    "inverter@lab": {
+      "publish": {
+        "inv/data": {
+          "type": "object",
+          "events": {
+            "energy": [
+              "js:payload_transfer({'port': 'ac'}, payload, {'current': '', 'power_ac': 'power'})",
+              "js:payload_transfer({'port': 'dc'}, payload, {'power_dc': 'power'})"
+            ],
+            "stats": "js:payload_transfer({'port': 'inv'}, payload, ['status', 'model'])"
+          }
+        }
+      }
+    },
     "catchall@lab": {
       "subscribe": { "#": { "handler": "on_all" } }
     },
@@ -142,6 +156,10 @@
     { "entry_call": "entry_topic_published_definition", "entry": "light@lab", "args": ["home/light"], "pick": ["type", "notify"] },
     { "entry_call": "entry_topic_subscription_definition", "entry": "history@lab", "args": ["history/get"], "pick": ["description"] },
     { "call": "entries_publishers_of", "args": ["history/x"], "keys": true },
-    { "call": "transform_action_reference_to_event_reference", "args": ["a@b.x-set(js: params['x'] = params['a'] == 1; params['y'] = params['b'] != 2; params['z'] <= 3)"] }
+    { "call": "transform_action_reference_to_event_reference", "args": ["a@b.x-set(js: params['x'] = params['a'] == 1; params['y'] = params['b'] != 2; params['z'] <= 3)"] },
+    { "message": "inv/data", "payload": "{\"current\": 1.5, \"power_ac\": 300, \"power_dc\": 310, \"status\": 4}" },
+    { "call": "event_get", "args": ["inverter@lab.energy(js:params['port'] == 'ac')"] },
+    { "call": "event_get", "args": ["inverter@lab.energy(js:params['port'] == 'dc')"] },
+    { "call": "event_get", "args": ["inverter@lab.stats"] }
   ]
 }

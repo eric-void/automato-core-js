@@ -653,13 +653,15 @@ function camel_to_snake_case(string) {
 
 function payload_transfer(base_result, payload, keys, empty_result = null) {
   let result = {};
-  if (is_array(keys))
+  if (is_array(keys)) {
     for (let k of keys)
       if (k in payload)
         result[k] = payload[k];
-  else if (is_dict(keys))
+  } else if (is_dict(keys)) {
+    // { 'key in payload': 'key in result' }, an empty value keeps the same key (like python)
     for (let k in keys)
       if (k in payload)
-        result[keys[k]] = payload[k];
+        result[keys[k] ? keys[k] : k] = payload[k];
+  }
   return Object.keys(result).length ? dict_merge(base_result, result) : empty_result;
 }
