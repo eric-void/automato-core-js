@@ -15,9 +15,11 @@ AutomatoMqtt = function(system) {
   this.destroyed = false;
 
   // To avoid deadlocks and race conditions con mqtt client (possible in multi-thread environment with on_message and publish calls collisions) we use a "communication queue" to serialize all calls to on_message and publish
-  // Javascript on chrome specific: when a tab is in background, each setTimeout is slower (at least 1 second), so _mqtt_communication_thread is slower. To avoid this, i create more "simulated threads" in parallel.
-  this.mqtt_communication_threads = [];
-  this.mqtt_communication_threads_count = 10;
+  // Like python there is a single thread, sleeping until a message is queued (queue.get() in python).
+  // Javascript specific: the page has a single real thread, so a long queue is processed in short batches, to let the browser update the page. Timers are not used for this: when a tab is in background each setTimeout is slower (at least 1 second).
+  this.mqtt_communication_thread = false;
+  this.mqtt_communication_wake = null;
+  this.mqtt_communication_batch_ms = 12;
   this.mqtt_communication_queue = null;
   this.mqtt_communication_queue_only_subscribe = true; // False = use queue for publish and subscribe, True = use it only for subscribe
   this.mqtt_communication_recent_delay = 0;
@@ -50,20 +52,16 @@ AutomatoMqtt = function(system) {
     this.disconnect_queue = [];
     this.destroyed = false;
 
+    this._mqtt_communication_thread_stop();
     this.mqtt_communication_queue = []
-    for (let i = 0; i < this.mqtt_communication_threads_count; i++)
-      this.mqtt_communication_threads.push(thread_start(this._mqtt_communication_thread, true, this));
+    this.mqtt_communication_thread = thread_start(this._mqtt_communication_thread, true, this);
 
     if (lsettings)
       this.config(lsettings)
   }
   
   this.destroy = function() {
-    if (this.mqtt_communication_threads) {
-      for (let t of this.mqtt_communication_threads)
-        thread_end(t);
-      this.mqtt_communication_threads = [];
-    }
+    this._mqtt_communication_thread_stop();
     if (this.connected)
       this.disconnect();
     this.destroyed = true;
@@ -187,8 +185,46 @@ AutomatoMqtt = function(system) {
     }
   }
 
+  this._mqtt_communication_thread_stop = function() {
+    if (this.mqtt_communication_thread) {
+      thread_end(this.mqtt_communication_thread);
+      this.mqtt_communication_thread = false;
+    }
+    this._mqtt_communication_notify();
+  }
+
+  this._mqtt_communication_push = function(d) {
+    this.mqtt_communication_queue.push(d);
+    this._mqtt_communication_notify();
+  }
+
+  this._mqtt_communication_notify = function() {
+    if (this.mqtt_communication_wake) {
+      let wake = this.mqtt_communication_wake;
+      this.mqtt_communication_wake = null;
+      wake();
+    }
+  }
+
+  this._mqtt_communication_wait = function() {
+    return new Promise(resolve => { this.mqtt_communication_wake = resolve; });
+  }
+
+  // Let the browser do its work (MessageChannel is not slowed down in background, like timers)
+  this._mqtt_communication_yield = function() {
+    return new Promise(resolve => {
+      let channel = new MessageChannel();
+      channel.port1.onmessage = function() {
+        channel.port1.close();
+        resolve();
+      };
+      channel.port2.postMessage(0);
+    });
+  }
+
   this._mqtt_communication_thread = async function() {
     //console.warn("_mqtt_communication_thread");
+    let batch_start = 0;
     while (thread_check(this)) {
       let d = this.context.mqtt_communication_queue.shift();
       if (d) {
@@ -248,7 +284,13 @@ AutomatoMqtt = function(system) {
           // }
         }
       }
-      await thread_sleep(.1);
+      if (!this.context.mqtt_communication_queue.length) {
+        await this.context._mqtt_communication_wait();
+        batch_start = system.timems();
+      } else if (system.timems() - batch_start >= this.context.mqtt_communication_batch_ms) {
+        await this.context._mqtt_communication_yield();
+        batch_start = system.timems();
+      }
     }
   }
 
@@ -273,7 +315,7 @@ AutomatoMqtt = function(system) {
           return;
         }
 
-    this.mqtt_communication_queue.push({'type': 'subscribe', 'topic': topic, 'payload': payload.toString(), 'retain': packet.retain, 'qos': packet.qos, 'timems': system.timems()});
+    this._mqtt_communication_push({'type': 'subscribe', 'topic': topic, 'payload': payload.toString(), 'retain': packet.retain, 'qos': packet.qos, 'timems': system.timems()});
     if (this.connected < 3) {
       this.connected = 3;
       if ('_connect_callback' in this.settings && this.settings['_connect_callback'])
@@ -369,7 +411,7 @@ AutomatoMqtt = function(system) {
       if (this.mqtt_communication_queue_only_subscribe)
         this._mqtt_communication_publish(topic, payload, qos, retain);
       else
-        this.mqtt_communication_queue.push({'type': 'publish', 'topic': topic, 'payload': payload, 'qos': qos, 'retain': retain, 'timems': system.timems()});
+        this._mqtt_communication_push({'type': 'publish', 'topic': topic, 'payload': payload, 'qos': qos, 'retain': retain, 'timems': system.timems()});
     }
   }
 

@@ -50,6 +50,7 @@ AutomatoSystem = function(caller_context) {
   const EVENT_KEYS = ['port'];
 
   this.index_topic_cache = { 'hits': 0, 'miss': 0, 'data': {} };
+  this.index_topic_cache_size = {}; // JS only: the length of an object is not known without reading all its keys (in python it is)
   // this.index_topic_cache_lock TODO
   this.INDEX_TOPIC_CACHE_MAXSIZE = 1024;
   this.INDEX_TOPIC_CACHE_PURGETIME = 3600;
@@ -267,7 +268,7 @@ AutomatoSystem = function(caller_context) {
   this._stats_start_t = 0;
   this._stats_show_t = 0;
 
-  this.DEBUG_STATS_INTERVAL = 60 // every X seconds log stats of timings
+  this.DEBUG_STATS_INTERVAL = 600 // every X seconds log stats of timings
 
   this._stats_start = function() {
     let t = (new Date()).getTime();
@@ -946,6 +947,13 @@ AutomatoSystem = function(caller_context) {
 
   this.topic_cache_reset = function() {
     this.index_topic_cache = { 'hits': 0, 'miss': 0, 'data': { } };
+    this.index_topic_cache_size = {};
+  }
+
+  this._topic_cache_store = function(cache_key, key, value) {
+    if (!(key in this.index_topic_cache['data'][cache_key]))
+      this.index_topic_cache_size[cache_key] = (this.index_topic_cache_size[cache_key] || 0) + 1;
+    this.index_topic_cache['data'][cache_key][key] = value;
   }
 
   this.topic_cache_find = function(index, cache_key, topic, payload = null) {
@@ -956,7 +964,7 @@ AutomatoSystem = function(caller_context) {
     if (!(cache_key in this.index_topic_cache['data']))
       this.index_topic_cache['data'][cache_key] = {};
 
-    if (len(this.index_topic_cache['data'][cache_key]) > this.INDEX_TOPIC_CACHE_MAXSIZE) {
+    if ((this.index_topic_cache_size[cache_key] || 0) > this.INDEX_TOPIC_CACHE_MAXSIZE) {
       let t = this.INDEX_TOPIC_CACHE_PURGETIME;
       while (len(this.index_topic_cache['data'][cache_key]) > this.INDEX_TOPIC_CACHE_MAXSIZE) {
         for (let x in this.index_topic_cache['data'][cache_key])
@@ -964,6 +972,7 @@ AutomatoSystem = function(caller_context) {
             delete this.index_topic_cache['data'][cache_key][x];
         t = t > 1 ? t / 2 : -1;
       }
+      this.index_topic_cache_size[cache_key] = len(this.index_topic_cache['data'][cache_key]);
     }
 
     let topic_and_payload = null
@@ -994,12 +1003,12 @@ AutomatoSystem = function(caller_context) {
         use_payload = true;
     }
     if (!use_payload)
-      this.index_topic_cache['data'][cache_key][topic] = res;
+      this._topic_cache_store(cache_key, topic, res);
     else {
-      this.index_topic_cache['data'][cache_key][topic] = { 'use_payload': true, 'used': this.time() };
+      this._topic_cache_store(cache_key, topic, { 'use_payload': true, 'used': this.time() });
       if (topic_and_payload == null)
         topic_and_payload = topic + "[" + this.message_payload_serialize(payload) + "]";
-      this.index_topic_cache['data'][cache_key][topic_and_payload] = res;
+      this._topic_cache_store(cache_key, topic_and_payload, res);
     }
     return res['result'];
   }

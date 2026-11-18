@@ -697,13 +697,95 @@ test('payload decoding follows python rules', () => {
   assert.strictEqual(broker._timePayload('text'), null);
 });
 
+test('mqtt queue: the thread sleeps with no messages, and wakes up in order when they arrive', async () => {
+  let { system, client } = bootSystem();
+  let topics = [];
+  system.on_message(m => topics.push(m.topic));
+  await sleep(5);
+  assert.strictEqual(typeof system.broker().mqtt_communication_wake, 'function');
+  for (let i = 0; i < 5; i ++)
+    client.brokerSends('queue/' + i, '1');
+  await Promise.resolve();
+  await Promise.resolve();
+  same(topics, ['queue/0', 'queue/1', 'queue/2', 'queue/3', 'queue/4']);
+  assert.strictEqual(typeof system.broker().mqtt_communication_wake, 'function');
+});
+
+test('mqtt queue: a long queue leaves time to the browser, without losing the order', async () => {
+  let { system, client } = bootSystem();
+  let topics = [], turns = 0, running = true;
+  system.on_message(m => topics.push(m.topic));
+  (function turn() { if (running) { turns ++; setImmediate(turn); } })();
+  await sleep(5);
+  system.broker().mqtt_communication_batch_ms = 0;
+  let before = turns;
+  for (let i = 0; i < 50; i ++)
+    client.brokerSends('queue/' + i, '1');
+  while (topics.length < 50)
+    await sleep(1);
+  running = false;
+  same(topics, Array.from({ length: 50 }, (v, i) => 'queue/' + i));
+  assert.ok(turns - before >= 5, 'other tasks must run while the queue is processed, they were ' + (turns - before));
+});
+
+test('mqtt queue: destroy stops the thread', async () => {
+  let { system, client } = bootSystem();
+  let topics = [];
+  system.on_message(m => topics.push(m.topic));
+  await sleep(5);
+  system.broker().destroy();
+  assert.strictEqual(system.broker().mqtt_communication_wake, null);
+  client.brokerSends('queue/late', '1');
+  await sleep(5);
+  same(topics, []);
+});
+
+test('scripts: names of the page are hidden, and the context works as usual', () => {
+  let { system } = bootSystem();
+  global.automato_test_global = 'page';
+  try {
+    let scripting = new AutomatoScriptingJs(system, { 'automato_test_global': true });
+    assert.strictEqual(scripting.script_eval("js:typeof automato_test_global"), 'undefined');
+    assert.strictEqual(scripting.script_eval("js:automato_test_global", { 'automato_test_global': 5 }), 5);
+    let context = { 'a': 1, 'gone': 1 };
+    scripting.script_exec("js:a = 2; automato_test_global = 7; gone = undefined;", context);
+    same(context, { 'a': 2, 'automato_test_global': 7 });
+    assert.strictEqual(scripting.script_eval("js:typeof automato_test_global"), 'undefined');
+    assert.strictEqual(global.automato_test_global, 'page');
+  } finally {
+    delete global.automato_test_global;
+  }
+});
+
+test('topic cache: the purge starts at the same size, with topics and payloads', () => {
+  let { system } = bootSystem();
+  let index = { 'a/#': { 'entries': [] }, 'b/#[js: payload == "x"]': { 'entries': [] } };
+  system.topic_cache_reset();
+  system.INDEX_TOPIC_CACHE_MAXSIZE = 3;
+  for (let i = 0; i < 20; i ++) {
+    system.topic_cache_find(index, 'test', 'a/' + i);
+    let keys = Object.keys(system.index_topic_cache['data']['test']);
+    assert.strictEqual(system.index_topic_cache_size['test'], keys.length);
+    assert.ok(keys.length <= 4, 'size is ' + keys.length);
+  }
+  system.topic_cache_reset();
+  system.INDEX_TOPIC_CACHE_MAXSIZE = 100;
+  for (let i = 0; i < 3; i ++)
+    system.topic_cache_find(index, 'test', 'b/1', 'v' + i);
+  assert.strictEqual(system.index_topic_cache_size['test'], Object.keys(system.index_topic_cache['data']['test']).length);
+  system.topic_cache_find(index, 'test', 'b/1', 'v0');
+  assert.strictEqual(system.index_topic_cache['hits'], 1);
+  system.topic_cache_reset();
+  same(system.index_topic_cache_size, {});
+});
+
 //
 // Call alignment with python core
 //
 
 const JS_ONLY = {
-  'system': ['Entry', 'Message', 'PublishedMessage', 'SubscribedMessage', 'set_config', '_topic_matches_for_message', '_re_groupdict'],
-  'mqtt': ['_onReconnect', '_skipEmptyWrites', 'cachePrint'],
+  'system': ['Entry', 'Message', 'PublishedMessage', 'SubscribedMessage', 'set_config', '_topic_matches_for_message', '_re_groupdict', '_topic_cache_store'],
+  'mqtt': ['_onReconnect', '_skipEmptyWrites', 'cachePrint', '_mqtt_communication_thread_stop', '_mqtt_communication_push', '_mqtt_communication_notify', '_mqtt_communication_wait', '_mqtt_communication_yield'],
 };
 const PY_ONLY = {
   'system': ['_on_mqtt_message_process', '_topic_rule_parse'], // python only: thread-local current message reset, topic rules parse cache (performance on slow nodes)

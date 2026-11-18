@@ -21,7 +21,8 @@ function AutomatoScriptingJs(system, caller_context) {
   this.exports = {};
 
   this.script_context = function(context = {}) {
-    let res = Object.assign({}, context_mask, {
+    // The mask is the prototype: it hides the same names, without copying them at every evaluation
+    let res = Object.assign(Object.create(context_mask), {
       'now': Math.floor((new Date()).getTime() / 1000),
       'd': read_duration,
       't': parse_datetime,
@@ -43,7 +44,7 @@ function AutomatoScriptingJs(system, caller_context) {
   }
 
   this.script_context_return = function(script_context, original_context) {
-    for (let k in script_context) {
+    for (let k of Object.keys(script_context)) {
       if (typeof script_context[k] != 'undefined' && !['now', 'd', 't', 'print'].includes(k) && !(k in this.exports) && (!(k in original_context) || original_context[k] != script_context[k]))
         original_context[k] = script_context[k];
     }
