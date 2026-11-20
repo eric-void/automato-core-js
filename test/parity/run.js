@@ -2,6 +2,7 @@
 /**
  * Run the same scenario on both cores (with the same positional calls) and compare the results.
  * Python core runs in the automato-node docker image (it has the dependencies), with the source of the sibling checkout: node automato-core-js/test/parity/run.js
+ * AUTOMATO_SCRIPTING_ENGINE=quickjs selects the scripting engine of the python core (default js2py; the image must have quickjs-ng).
  */
 const fs = require('fs');
 const path = require('path');
@@ -79,6 +80,7 @@ function runPy() {
     '-v', CORE_PY + ':/opt/automato/automato-core-py/src:ro',
     '-v', __dirname + ':/parity:ro',
     '-e', 'PYTHONDONTWRITEBYTECODE=1',
+    '-e', 'AUTOMATO_SCRIPTING_ENGINE',
     DOCKER_IMAGE, '/parity/run.py', '/parity/scenario.json'], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
   let line = output.split('\n').find(l => l.startsWith('PARITY_RESULT:'));
   assert.ok(line, 'no result from python runner:\n' + output);
